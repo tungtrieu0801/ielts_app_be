@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 import passport from "passport";
 import pkg from "passport-google-oauth20";
+import User from "../models/User.js"; // Import cái model đã có mongoose ở trong
 
 const { Strategy: GoogleStrategy } = pkg;
 
@@ -14,16 +15,22 @@ passport.use(
         },
         async (accessToken, refreshToken, profile, done) => {
             try {
-
-                const user = {
+                const userData = {
                     googleId: profile.id,
                     email: profile.emails?.[0]?.value,
                     name: profile.displayName,
-                    avatar: profile.photos?.[0]?.value,
+                    picture: profile.photos?.[0]?.value,
+                    lastLogin: new Date()
                 };
 
-                return done(null, user);
+                // Lệnh này sẽ chạy mượt vì model User đã được khởi tạo với mongoose
+                let user = await User.findOneAndUpdate(
+                    { googleId: profile.id },
+                    userData,
+                    { new: true, upsert: true }
+                );
 
+                return done(null, user);
             } catch (err) {
                 return done(err, null);
             }
