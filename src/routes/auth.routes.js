@@ -1,47 +1,50 @@
 import express from "express";
 import passport from "../middleware/passport.js";
 import { googleCallback } from "../controllers/auth.controller.js";
-
-/*
-    Trong express, router khai báo endpoint URL + method
-    Controller xử lí logic khi endpoint được gọi
-    Service xử lí business logic
- */
+import { generateToken } from "../utils/jwt.js";
 
 const router = express.Router();
 
 /* redirect tới Google */
-
 router.get(
     "/google",
-    passport.authenticate("google", {
-        scope: ["profile", "email"]
-    })
+    passport.authenticate("google", { scope: ["profile", "email"] })
 );
 
 /* callback */
-
 router.get(
     "/google/callback",
     passport.authenticate("google", { session: false }),
     googleCallback
 );
 
+/* /me — trả về user từ token */
 router.get("/me", (req, res) => {
     console.log(">>> [BE] Đang có request gọi /auth/me");
-
-    // Fake dữ liệu giống hệt cấu trúc Google trả về
     const fakeUser = {
         name: "Tùng Triệu",
         email: "tungtrieu.dev@gmail.com",
-        picture: "https://bit.ly/dan-abramov", // Hoặc để trống để test chữ cái đầu
+        picture: "https://bit.ly/dan-abramov",
         role: "Nhân tài cõi sỏi"
     };
-
-    // Trả về đúng cấu trúc mà FE đang mong đợi
-    res.json({
-        user: fakeUser
-    });
+    res.json({ user: fakeUser });
 });
 
-export default router;
+/* /dev-login — chỉ dùng trong development để bypass Google OAuth */
+router.get("/dev-login", (req, res) => {
+    if (process.env.NODE_ENV === "production") {
+        return res.status(403).json({ message: "Not available in production" });
+    }
+    const devUser = {
+        _id: "dev-user-001",
+        googleId: "dev-google-id",
+        name: "Dev User",
+        email: "dev@ielts-vocab.local",
+        picture: "https://api.dicebear.com/7.x/avataaars/svg?seed=DevUser",
+    };
+    const token = generateToken(devUser);
+    const redirectUrl = `${process.env.FRONTEND_URL}/oauth-success?token=${token}`;
+    res.redirect(redirectUrl);
+});
+
+export default router;
