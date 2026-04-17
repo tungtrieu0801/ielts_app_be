@@ -13,6 +13,18 @@ const wordSchema = new mongoose.Schema(
             required: true,
             trim: true,
         },
+        // Phiên âm IPA, ví dụ: /ˈæb.sələt/
+        pronunciation: {
+            type: String,
+            default: "",
+            trim: true,
+        },
+        // Từ loại: noun, verb, adjective, adverb, phrase...
+        partOfSpeech: {
+            type: String,
+            default: "",
+            trim: true,
+        },
         example: {
             type: String,
             default: "",

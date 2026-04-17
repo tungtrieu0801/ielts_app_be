@@ -36,7 +36,7 @@ export const createWord = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
         const { setId } = req.params;
-        const { english, vietnamese, example, synonyms, antonyms } = req.body;
+        const { english, vietnamese, pronunciation, partOfSpeech, example, synonyms, antonyms } = req.body;
 
         if (!english?.trim() || !vietnamese?.trim()) {
             return res.status(400).json({ message: "English and Vietnamese are required" });
@@ -48,6 +48,8 @@ export const createWord = async (req, res) => {
         const word = await Word.create({
             english: english.trim(),
             vietnamese: vietnamese.trim(),
+            pronunciation: pronunciation?.trim() || "",
+            partOfSpeech: partOfSpeech?.trim() || "",
             example: example?.trim() || "",
             synonyms: Array.isArray(synonyms) ? synonyms : [],
             antonyms: Array.isArray(antonyms) ? antonyms : [],
@@ -78,12 +80,13 @@ export const bulkCreateWords = async (req, res) => {
         const set = await WordSet.findOne({ _id: setId, userId });
         if (!set) return res.status(404).json({ message: "Word set not found" });
 
-        // Validate và filter bỏ các dòng thiếu dữ liệu bắt buộc
         const validWords = words
             .filter(w => w.english?.trim() && w.vietnamese?.trim())
             .map(w => ({
                 english: w.english.trim(),
                 vietnamese: w.vietnamese.trim(),
+                pronunciation: w.pronunciation?.trim() || "",
+                partOfSpeech: w.partOfSpeech?.trim() || "",
                 example: w.example?.trim() || "",
                 synonyms: w.synonyms ? (Array.isArray(w.synonyms) ? w.synonyms : w.synonyms.split(",").map(s => s.trim())) : [],
                 antonyms: w.antonyms ? (Array.isArray(w.antonyms) ? w.antonyms : w.antonyms.split(",").map(s => s.trim())) : [],
