@@ -72,7 +72,12 @@ jobs:
             docker pull tungtrieu0801/ielts_app_be:$BACKUP_TAG
             
             echo "Restart backend với image mới"
-            docker-compose up -d backend
+            docker run -d \
+              --name ielts_app_be \
+              --env-file /opt/ielts_app/.env \
+              -p 5000:5000 \
+              --restart unless-stopped \
+              tungtrieu0801/ielts_app_be:$IMAGE_TAG
             
             echo "Dọn dẹp các dangling images (không xóa backup)"
             docker image prune -f --filter "dangling=true"
