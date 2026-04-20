@@ -75,7 +75,7 @@ jobs:
             docker run -d \
               --name ielts_app_be \
               --env-file /opt/ielts_app/.env \
-              --network="host" \
+              -p 5001:5000 \
               --restart unless-stopped \
               tungtrieu0801/ielts_app_be:$IMAGE_TAG
             
