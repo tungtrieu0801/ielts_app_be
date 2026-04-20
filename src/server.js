@@ -26,7 +26,12 @@ app.use("/wordsets", wordSetRoutes);
 app.use("/wordsets/:setId/words", wordRoutes);
 app.use("/study", studyRoutes);
 
-// Health check
+// Health & Status check
+app.get("/", (req, res) => res.json({ 
+    message: "IELTS App Backend is running! 🚀", 
+    status: "ok", 
+    timestamp: new Date() 
+}));
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
 const PORT = process.env.PORT || 5000;
