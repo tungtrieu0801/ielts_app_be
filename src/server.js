@@ -23,14 +23,14 @@ app.use(passport.initialize());
 // Routes
 app.use("/auth", authRoutes);
 app.use("/wordsets", wordSetRoutes);
-app.use("/wordsets/:setId/words", wordRoutes);
+// app.use("/wordsets/:setId/words", wordRoutes);
 app.use("/study", studyRoutes);
 
 // Health & Status check
-app.get("/", (req, res) => res.json({ 
-    message: "IELTS App Backend is running! 🚀", 
-    status: "ok", 
-    timestamp: new Date() 
+app.get("/", (req, res) => res.json({
+    message: "IELTS App Backend is running! 🚀",
+    status: "ok",
+    timestamp: new Date()
 }));
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
