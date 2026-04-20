@@ -1,0 +1,79 @@
+name: Deploy IELTS App Backend (with backup)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 2. Log in Docker Hub
+      - name: Log in Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # 3. Build and tag Docker image
+      - name: Build and tag Docker image
+        run: |
+          IMAGE_TAG=${GITHUB_SHA::7}
+          BACKUP_TAG=backup-${IMAGE_TAG}
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "BACKUP_TAG=$BACKUP_TAG" >> $GITHUB_ENV
+
+          # Build image
+          docker build -t tungtrieu0801/ielts_app_be:$IMAGE_TAG .
+
+          # Tag latest
+          docker tag tungtrieu0801/ielts_app_be:$IMAGE_TAG tungtrieu0801/ielts_app_be:latest
+
+          # Tag backup image
+          docker tag tungtrieu0801/ielts_app_be:$IMAGE_TAG tungtrieu0801/ielts_app_be:$BACKUP_TAG
+
+      # 4. Push Docker images
+      - name: Push Docker images
+        run: |
+          docker push tungtrieu0801/ielts_app_be:$IMAGE_TAG
+          docker push tungtrieu0801/ielts_app_be:latest
+          docker push tungtrieu0801/ielts_app_be:$BACKUP_TAG
+
+      # 5. SSH vào VPS và deploy
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: IMAGE_TAG BACKUP_TAG
+          script: |
+            cd /opt/ielts_app
+            
+            export IMAGE_TAG=${IMAGE_TAG:-latest}
+            export BACKUP_TAG=${BACKUP_TAG:-backup-latest}
+            
+            echo "Cập nhật IMAGE_TAG và BACKUP_TAG trong .env"
+            sed -i "/^IMAGE_TAG=/c\IMAGE_TAG=$IMAGE_TAG" .env
+            sed -i "/^BACKUP_TAG=/c\BACKUP_TAG=$BACKUP_TAG" .env
+            
+            echo "Xóa container backend cũ nếu còn tồn tại"
+            docker rm -f ielts_app_be || true
+            
+            echo "Pull image mới"
+            docker pull tungtrieu0801/ielts_app_be:$IMAGE_TAG
+            docker pull tungtrieu0801/ielts_app_be:latest
+            docker pull tungtrieu0801/ielts_app_be:$BACKUP_TAG
+            
+            echo "Restart backend với image mới"
+            docker-compose up -d backend
+            
+            echo "Dọn dẹp các dangling images (không xóa backup)"
+            docker image prune -f --filter "dangling=true"
+
