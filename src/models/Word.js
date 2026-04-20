@@ -30,6 +30,11 @@ const wordSchema = new mongoose.Schema(
             default: "",
             trim: true,
         },
+        exampleTranslation: {
+            type: String,
+            default: "",
+            trim: true,
+        },
         synonyms: {
             type: [String],
             default: [],
@@ -37,6 +42,11 @@ const wordSchema = new mongoose.Schema(
         antonyms: {
             type: [String],
             default: [],
+        },
+        level: {
+            type: String,
+            default: "", // e.g. C1, C2, B2
+            trim: true,
         },
 
         // Relations
