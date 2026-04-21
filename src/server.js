@@ -23,7 +23,7 @@ app.use(passport.initialize());
 // Routes
 app.use("/auth", authRoutes);
 app.use("/wordsets", wordSetRoutes);
-// app.use("/wordsets/:setId/words", wordRoutes);
+app.use("/wordsets/:setId/words", wordRoutes);
 app.use("/study", studyRoutes);
 
 // Health & Status check
