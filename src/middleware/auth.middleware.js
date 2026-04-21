@@ -11,7 +11,7 @@ export const verifyToken = (req, res, next) => {
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        // decoded: { id (googleId), email, name }
+        // decoded: { id (googleId), email, name,... }
         req.user = decoded;
         next();
     } catch (err) {
