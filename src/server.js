@@ -9,6 +9,7 @@ import authRoutes from "./routes/auth.routes.js";
 import wordSetRoutes from "./routes/wordset.routes.js";
 import wordRoutes from "./routes/word.routes.js";
 import studyRoutes from "./routes/study.routes.js";
+import dictationRoutes from "./routes/dictation.routes.js";
 import connectDB from "./config/db.js";
 
 const app = express();
@@ -25,6 +26,7 @@ app.use("/auth", authRoutes);
 app.use("/wordsets", wordSetRoutes);
 app.use("/wordsets/:setId/words", wordRoutes);
 app.use("/study", studyRoutes);
+app.use("/dictation", dictationRoutes);
 
 // Health & Status check
 app.get("/", (req, res) => res.json({
