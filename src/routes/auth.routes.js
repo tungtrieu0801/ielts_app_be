@@ -2,6 +2,8 @@ import express from "express";
 import passport from "../middleware/passport.js";
 import { googleCallback } from "../controllers/auth.controller.js";
 import { generateToken } from "../utils/jwt.js";
+import { verifyToken } from "../middleware/auth.middleware.js";
+import User from "../models/User.js";
 
 const router = express.Router();
 
@@ -19,15 +21,17 @@ router.get(
 );
 
 /* /me — trả về user từ token */
-router.get("/me", (req, res) => {
-    console.log(">>> [BE] Đang có request gọi /auth/me");
-    const fakeUser = {
-        name: "Tùng Triệu",
-        email: "tungtrieu.dev@gmail.com",
-        picture: "https://bit.ly/dan-abramov",
-        role: "Nhân tài cõi sỏi"
-    };
-    res.json({ user: fakeUser });
+router.get("/me", verifyToken, async (req, res) => {
+    try {
+        const user = await User.findOne({ googleId: req.user.id });
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        res.json({ user });
+    } catch (error) {
+        console.error("Error fetching /auth/me:", error);
+        res.status(500).json({ message: "Server Error" });
+    }
 });
 
 /* /dev-login — chỉ dùng trong development để bypass Google OAuth */
