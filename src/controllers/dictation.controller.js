@@ -146,37 +146,7 @@ function extractVideoId(url) {
     return m ? m[1] : null;
 }
 
-/**
- * YouTube's newer caption XML uses <p t="ms" d="ms"> format.
- * Older one uses <text start="s" dur="s"> format.
- * We handle both.
- */
-function parseCaptionXml(xml) {
-    const items = [];
 
-    // Try newer <p t="..." d="..."> format (ms timestamps)
-    const pRegex = /<p\s+t="(\d+)"\s+d="(\d+)"[^>]*>([\s\S]*?)<\/p>/g;
-    let m;
-    while ((m = pRegex.exec(xml)) !== null) {
-        // Extract text from <s> tags or the raw element
-        let text = '';
-        const sRegex = /<s[^>]*>([^<]*)<\/s>/g;
-        let sm;
-        while ((sm = sRegex.exec(m[3])) !== null) text += sm[1];
-        if (!text) text = m[3].replace(/<[^>]+>/g, '');
-        text = decodeHtml(text).trim();
-        if (text) items.push({ start: parseInt(m[1], 10) / 1000, dur: parseInt(m[2], 10) / 1000, text });
-    }
-    if (items.length > 0) return items;
-
-    // Fallback: older <text start="s" dur="s"> format
-    const tRegex = /<text[^>]*start="([^"]*)"[^>]*dur="([^"]*)"[^>]*>([\s\S]*?)<\/text>/g;
-    while ((m = tRegex.exec(xml)) !== null) {
-        const text = decodeHtml(m[3].replace(/<[^>]+>/g, '').replace(/\n/g, ' ')).trim();
-        if (text) items.push({ start: parseFloat(m[1]), dur: parseFloat(m[2]), text });
-    }
-    return items;
-}
 
 // Method A: InnerTube API (JSON POST — most reliable, used by official apps)
 async function fetchViaInnerTube(videoId) {
@@ -289,74 +259,106 @@ async function fetchYouTubeCaptions(videoId) {
     throw new Error('Không tìm thấy phụ đề cho video này sau khi thử tất cả phương pháp.');
 }
 
-/**
- * Merge caption segments into logical sentences.
- * 
- * Pipeline:
- * Step 1: Split raw XML chunks that contain multiple sentences internally (e.g., ASR or blocky manual subs).
- *         Distribute timestamps proportionally by word count.
- * Step 2: Accumulate these fragments until we hit a real punctuation mark.
- *         This allows us to stitch a sentence "for the body." back to "Celery juice has so many benefits".
- * Step 3: Clamp the `end` time of sentences to prevent the player from overshooting into the next audio snippet.
- */
-function mergeIntoSentences(captions) {
-    if (!captions || !captions.length) return [];
+function parseCaptionXml(xml) {
+    const items = [];
+    const pRegex = /<p\s+t="(\d+)"\s+d="(\d+)"[^>]*>([\s\S]*?)<\/p>/g;
+    let m;
+    while ((m = pRegex.exec(xml)) !== null) {
+        const pStart = parseInt(m[1], 10) / 1000;
+        const pDur = parseInt(m[2], 10) / 1000;
+        const innerXml = m[3];
 
-    // Step 1: Flatten & Split internal sentences
-    const flatParts = [];
-    const rawItems = captions
-        .sort((a, b) => a.start - b.start)
-        .filter(c => c.text.trim().length > 0);
+        // Try extracting word-level precision via <s> tags (standard in newer YouTube tracks)
+        let hasS = false;
+        const sRegex = /<s(?:\s+[^>]*?)?>(.+?)<\/s>/g;
+        let sm;
+        while ((sm = sRegex.exec(innerXml)) !== null) {
+            hasS = true;
+            const fullTag = sm[0]; 
+            const tMatch = fullTag.match(/t="(\d+)"/);
+            let offset = 0;
+            if (tMatch) offset = parseInt(tMatch[1], 10) / 1000;
+            
+            const text = decodeHtml(sm[1]).trim();
+            // Use dur: 0 for now, we will calculate it based on next item's start
+            if (text) items.push({ start: pStart + offset, dur: 0, text });
+        }
 
-    for (const c of rawItems) {
-        let text = c.text.replace(/\[.*?\]/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-        if (!text) continue;
+        // Fallback if no <s> tags present (manual track fallback)
+        if (!hasS) {
+            const text = decodeHtml(innerXml.replace(/<[^>]+>/g, '')).trim();
+            if (text) items.push({ start: pStart, dur: pDur, text });
+        }
+    }
 
-        // Split text at internal sentence boundaries: Period/!/? followed by space and Capital letter/quote
-        // Exclude common abbreviations like Mr., Mrs., Dr.
-        const SENT_BREAK = /(?<=[.!?]["']?)(?<!\b(?:Mr|Mrs|Ms|Dr|St|Vs)\.)\s+(?=[A-Z"']|>>)/g;
-        const parts = text.split(SENT_BREAK).map(s => s.trim()).filter(Boolean);
+    // Older <text> format
+    if (!items.length) {
+        const tRegex = /<text\s+start="([\d.]+)"\s+dur="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
+        while ((m = tRegex.exec(xml)) !== null) {
+            const text = decodeHtml(m[3].replace(/<[^>]+>/g, '')).trim();
+            if (text) items.push({ start: parseFloat(m[1]), dur: parseFloat(m[2]), text });
+        }
+    }
 
-        if (parts.length <= 1) {
-            flatParts.push({ text: text, start: c.start, dur: c.dur });
-        } else {
-            const totalWords = text.split(/\s+/).length || 1;
-            let currentStart = c.start;
-            for (const part of parts) {
-                const partWords = part.split(/\s+/).length;
-                const partDur = c.dur * (partWords / totalWords);
-                flatParts.push({ text: part, start: currentStart, dur: partDur });
-                currentStart += partDur;
+    // Calculate actual durations for <s> tags to prevent cutting off the last word of a sentence
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.dur === 0) {
+            const nextItem = items[i + 1];
+            if (nextItem) {
+                // Determine word duration spanning to the next word
+                item.dur = Math.max(0.1, nextItem.start - item.start);
+                // Cap duration to 1.5s in case of a very long pause before next word
+                if (item.dur > 1.5) item.dur = Math.max(0.1, item.text.length * 0.08); 
+            } else {
+                // Very last word fallback: approximate based on chars
+                item.dur = Math.max(0.1, item.text.length * 0.08);
             }
         }
     }
 
-    // Step 2: Accumulate into real sentences
+    return items;
+}
+
+/**
+ * Merge caption segments into logical sentences.
+ * Operates on highly precise word-level elements (from <s> tags) OR chunk fallbacks.
+ */
+function mergeIntoSentences(captions) {
+    if (!captions || !captions.length) return [];
+
+    const rawItems = captions
+        .sort((a, b) => a.start - b.start)
+        .filter(c => c.text.trim().length > 0);
+
     const sentences = [];
     let bufText = '';
     let bufStart = null;
     let bufEnd = null;
 
-    for (let i = 0; i < flatParts.length; i++) {
-        const item = flatParts[i];
+    for (let i = 0; i < rawItems.length; i++) {
+        const item = rawItems[i];
         if (bufStart === null) bufStart = item.start;
         
-        bufText = bufText ? `${bufText} ${item.text}` : item.text;
-        bufEnd = item.start + item.dur;
+        // Clean text spaces
+        const t = item.text.replace(/\[.*?\]/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!t) continue;
+
+        bufText = bufText ? `${bufText} ${t}` : t;
+        bufEnd = Math.max(bufEnd || 0, item.start + item.dur);
 
         const wordCount = bufText.split(' ').length;
-        const endsWithPunct = /[.!?]["']?$/.test(item.text);
-        const nextItem = flatParts[i + 1];
+        const endsWithPunct = /[.!?]["']?$/.test(t);
+        const nextItem = rawItems[i + 1];
         const nextIsSpeaker = nextItem && /^>>/.test(nextItem.text);
         const nextIsFar = nextItem && (nextItem.start - bufEnd > 1.5);
 
-        // Break if we have a punctuation + reasonable length, OR speaker change, OR big gap, OR hard limit (35 words fallback)
-        if ((endsWithPunct && wordCount >= 3) || nextIsSpeaker || nextIsFar || wordCount >= 35) {
-            sentences.push({
-                text: bufText,
-                start: bufStart,
-                end: bufEnd
-            });
+        // Break if we have a punctuation + reasonable length, OR speaker change, OR big gap, OR hard limit (40 words)
+        // Also split at internal punctuation if using manual fallback text block
+        const hasInternalPunct = /[.!?]["']?\s+[A-Z]/.test(t) && !hasS_Tags_Enabled_Fallback(item);
+
+        if ((endsWithPunct && wordCount >= 3) || nextIsSpeaker || nextIsFar || wordCount >= 40 || hasInternalPunct) {
+            sentences.push({ text: bufText, start: bufStart, end: bufEnd });
             bufStart = null;
             bufText = '';
             bufEnd = null;
