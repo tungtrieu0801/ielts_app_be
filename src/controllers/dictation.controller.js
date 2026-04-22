@@ -290,47 +290,96 @@ async function fetchYouTubeCaptions(videoId) {
 }
 
 /**
- * Merge caption segments into sentences, preserving timestamps.
- * - Punctuated transcripts: split at .!?
- * - ASR captions with no punctuation: split every ~12 words
+ * Merge caption segments into logical sentences.
+ * 
+ * Pipeline:
+ * Step 1: Split raw XML chunks that contain multiple sentences internally (e.g., ASR or blocky manual subs).
+ *         Distribute timestamps proportionally by word count.
+ * Step 2: Accumulate these fragments until we hit a real punctuation mark.
+ *         This allows us to stitch a sentence "for the body." back to "Celery juice has so many benefits".
+ * Step 3: Clamp the `end` time of sentences to prevent the player from overshooting into the next audio snippet.
  */
 function mergeIntoSentences(captions) {
-    const sentences = [];
-    let currentText = '';
-    let sentenceStart = null;
-    let sentenceEnd = null;
-    let wordCount = 0;
-    const MAX_WORDS = 14;
+    if (!captions || !captions.length) return [];
 
-    const flush = () => {
-        const clean = currentText.trim();
-        if (clean.split(/\s+/).length >= 4) {
-            sentences.push({
-                text: clean,
-                start: sentenceStart ?? 0,
-                end: sentenceEnd ?? (sentenceStart ?? 0) + 5,
-            });
+    // Step 1: Flatten & Split internal sentences
+    const flatParts = [];
+    const rawItems = captions
+        .sort((a, b) => a.start - b.start)
+        .filter(c => c.text.trim().length > 0);
+
+    for (const c of rawItems) {
+        let text = c.text.replace(/\[.*?\]/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!text) continue;
+
+        // Split text at internal sentence boundaries: Period/!/? followed by space and Capital letter/quote
+        // Exclude common abbreviations like Mr., Mrs., Dr.
+        const SENT_BREAK = /(?<=[.!?]["']?)(?<!\b(?:Mr|Mrs|Ms|Dr|St|Vs)\.)\s+(?=[A-Z"']|>>)/g;
+        const parts = text.split(SENT_BREAK).map(s => s.trim()).filter(Boolean);
+
+        if (parts.length <= 1) {
+            flatParts.push({ text: text, start: c.start, dur: c.dur });
+        } else {
+            const totalWords = text.split(/\s+/).length || 1;
+            let currentStart = c.start;
+            for (const part of parts) {
+                const partWords = part.split(/\s+/).length;
+                const partDur = c.dur * (partWords / totalWords);
+                flatParts.push({ text: part, start: currentStart, dur: partDur });
+                currentStart += partDur;
+            }
         }
-        currentText = '';
-        sentenceStart = null;
-        sentenceEnd = null;
-        wordCount = 0;
-    };
-
-    for (const cap of captions) {
-        const t = cap.text.replace(/\[.*?\]/g, '').trim();
-        if (!t) continue;
-        if (sentenceStart === null) sentenceStart = cap.start;
-        sentenceEnd = cap.start + cap.dur;
-        currentText = currentText ? `${currentText} ${t}` : t;
-        wordCount += t.split(/\s+/).length;
-
-        const hasTerminator = /[.!?]$/.test(currentText.trimEnd());
-        if (hasTerminator || wordCount >= MAX_WORDS) flush();
     }
-    if (currentText.trim()) flush();
+
+    // Step 2: Accumulate into real sentences
+    const sentences = [];
+    let bufText = '';
+    let bufStart = null;
+    let bufEnd = null;
+
+    for (let i = 0; i < flatParts.length; i++) {
+        const item = flatParts[i];
+        if (bufStart === null) bufStart = item.start;
+        
+        bufText = bufText ? `${bufText} ${item.text}` : item.text;
+        bufEnd = item.start + item.dur;
+
+        const wordCount = bufText.split(' ').length;
+        const endsWithPunct = /[.!?]["']?$/.test(item.text);
+        const nextItem = flatParts[i + 1];
+        const nextIsSpeaker = nextItem && /^>>/.test(nextItem.text);
+        const nextIsFar = nextItem && (nextItem.start - bufEnd > 1.5);
+
+        // Break if we have a punctuation + reasonable length, OR speaker change, OR big gap, OR hard limit (35 words fallback)
+        if ((endsWithPunct && wordCount >= 3) || nextIsSpeaker || nextIsFar || wordCount >= 35) {
+            sentences.push({
+                text: bufText,
+                start: bufStart,
+                end: bufEnd
+            });
+            bufStart = null;
+            bufText = '';
+            bufEnd = null;
+        }
+    }
+
+    if (bufText.trim() && bufStart !== null) {
+        sentences.push({ text: bufText, start: bufStart, end: bufEnd });
+    }
+
+    // Step 3: Clamp end times to prevent overlapping audio
+    const gap = 0.05; // 50ms safety margin
+    for (let i = 0; i < sentences.length - 1; i++) {
+        const curr = sentences[i];
+        const next = sentences[i + 1];
+        if (curr.end > next.start - gap) {
+            curr.end = Math.max(curr.start + 0.5, next.start - gap);
+        }
+    }
+
     return sentences;
 }
+
 
 export const prepareYoutube = async (req, res) => {
     try {
