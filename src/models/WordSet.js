@@ -27,6 +27,18 @@ const wordSetSchema = new mongoose.Schema(
             type: String,
             default: "blue",
         },
+        // Public = visible to all users; private = owner only
+        isPublic: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+        // If this set was forked from another, store the source id
+        forkedFrom: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "WordSet",
+            default: null,
+        },
     },
     {
         timestamps: true,
