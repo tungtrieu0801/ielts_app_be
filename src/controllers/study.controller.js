@@ -5,7 +5,6 @@ import User from "../models/User.js";
 import StudyLog from "../models/StudyLog.js";
 import { calculateSRS } from "../utils/srs.js";
 
-const DAILY_NEW_LIMIT = 15;
 const SESSION_LIMIT = 20; // max cards per session
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -92,7 +91,7 @@ export const getStudySession = async (req, res) => {
 
         let sessionCards = [...dueCards];
 
-        // 2. Fill remaining slots with NEW cards
+        // 2. Fill remaining slots with NEW cards (up to SESSION_LIMIT)
         const remaining = SESSION_LIMIT - sessionCards.length;
         if (remaining > 0) {
             const newCards = await UserCard.find({
@@ -101,7 +100,7 @@ export const getStudySession = async (req, res) => {
                 status: "NEW",
             })
                 .sort({ createdAt: 1 })
-                .limit(Math.min(remaining, DAILY_NEW_LIMIT))
+                .limit(remaining)   // fill the full remaining quota
                 .lean();
             sessionCards = [...sessionCards, ...newCards];
         }
