@@ -13,7 +13,7 @@ export const getWords = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
         const { setId } = req.params;
-        const { page = 1, limit = 50 } = req.query;
+        const { page = 1, limit = 1000 } = req.query;
 
         // Verify ownership
         const set = await WordSet.findOne({ _id: setId, userId }).lean();
