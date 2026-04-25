@@ -242,10 +242,11 @@ export const getStudyStats = async (req, res) => {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
-        const [totalWords, totalSets, dueCards, newCards, masteredCards, reviewedToday] =
+        const [totalWords, totalSets, totalUserCards, dueCards, newCards, masteredCards, reviewedToday] =
             await Promise.all([
                 Word.countDocuments({ userId }),
                 WordSet.countDocuments({ userId }),
+                UserCard.countDocuments({ userId }),
                 UserCard.countDocuments({
                     userId,
                     status: { $in: ["LEARNING", "REVIEW"] },
@@ -259,12 +260,16 @@ export const getStudyStats = async (req, res) => {
                 }),
             ]);
 
+        // Words that haven't been "activated" (don't have a UserCard yet) are also NEW
+        const unactivatedCount = Math.max(0, totalWords - totalUserCards);
+        const actualDueCards = dueCards + unactivatedCount;
+
         res.json({
             data: {
                 totalWords,
                 totalSets,
-                dueCards,
-                newCards,
+                dueCards: actualDueCards,
+                newCards: newCards + unactivatedCount,
                 masteredCards,
                 reviewedToday,
             },
@@ -375,14 +380,21 @@ export const getStudySchedule = async (req, res) => {
         const userId = await getUserMongoId(req.user.id);
         const now = new Date();
 
-        // 1. Cards available right now
-        const availableNow = await UserCard.countDocuments({
-            userId,
-            $or: [
-                { status: "NEW" },
-                { status: { $in: ["LEARNING", "REVIEW"] }, nextReview: { $lte: now } },
-            ],
-        });
+        // 1. Cards available right now (NEW + DUE)
+        const [availableCardsCount, totalWords, totalUserCards] = await Promise.all([
+            UserCard.countDocuments({
+                userId,
+                $or: [
+                    { status: "NEW" },
+                    { status: { $in: ["LEARNING", "REVIEW"] }, nextReview: { $lte: now } },
+                ],
+            }),
+            Word.countDocuments({ userId }),
+            UserCard.countDocuments({ userId }),
+        ]);
+
+        const unactivatedCount = Math.max(0, totalWords - totalUserCards);
+        const availableNow = availableCardsCount + unactivatedCount;
 
         // 2. Upcoming cards (nextReview > now, sorted ascending)
         const upcoming = await UserCard.find({
@@ -430,6 +442,9 @@ export const getStudySchedule = async (req, res) => {
         const timeline = [...buckets.values()].slice(0, 6);
 
         // 4. Suggest a set that has due or new cards
+        let suggestedSetId = null;
+
+        // 4a. Try active cards first
         const firstDueCard = await UserCard.findOne({
             userId,
             $or: [
@@ -438,10 +453,27 @@ export const getStudySchedule = async (req, res) => {
             ],
         }).select("wordId").lean();
 
-        let suggestedSetId = null;
         if (firstDueCard) {
             const word = await Word.findById(firstDueCard.wordId).select("setId").lean();
             if (word) suggestedSetId = word.setId;
+        }
+
+        // 4b. If no active cards, find first unactivated set (one with words but no usercards)
+        if (!suggestedSetId && unactivatedCount > 0) {
+            const allSets = await WordSet.find({ userId }).sort({ createdAt: -1 }).lean();
+            for (const s of allSets) {
+                if (s.wordCount > 0) {
+                    // Check if this set has ANY word with a UserCard
+                    const firstWord = await Word.findOne({ setId: s._id }).select("_id").lean();
+                    if (firstWord) {
+                        const cardExists = await UserCard.exists({ userId, wordId: firstWord._id });
+                        if (!cardExists) {
+                            suggestedSetId = s._id;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         res.json({
