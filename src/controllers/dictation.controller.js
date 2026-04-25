@@ -2,9 +2,28 @@
 //  DICTATION CONTROLLER
 //  Case 1: POST /dictation/prepare-text  → fill-in-blank
 //  Case 2: POST /dictation/prepare-youtube → full-sentence typing
+//  Case 3: GET  /dictation/shared-library → danh sách video đã cache
 // ═══════════════════════════════════════════════════════════════════
+import YoutubeCache from "../models/YoutubeCache.js";
+import translate from "google-translate-api-x";
 
 // ── Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Xóa dấu nháy kép thừa, ký tự escape, và normalize whitespace.
+ * Input:  '"What is this?"'  or  'I said \"hello\"'
+ * Output: 'What is this?'   or  'I said hello'
+ */
+function cleanOriginal(text) {
+    return text
+        .replace(/\\"/g, '')     // \" → bỏ
+        .replace(/\\'/g, '')     // \' → bỏ
+        .replace(/\\\\/g, '')   // \\ → bỏ
+        .replace(/^"+|"+$/g, '') // dấu " đầu/cuối → bỏ
+        .replace(/^'+|'+$/g, '') // dấu ' đầu/cuối → bỏ
+        .replace(/\s+/g, ' ')   // normalize spaces
+        .trim();
+}
 
 function shuffle(arr) {
     const a = [...arr];
@@ -59,10 +78,10 @@ function findPatternChunks(sentence) {
 }
 
 const STOP_WORDS = new Set([
-    'a','an','the','is','are','was','were','be','been','being','have','has','had',
-    'do','does','did','will','would','could','should','may','might','shall',
-    'and','or','but','if','that','this','these','those','it','its',
-    'in','on','at','to','for','of','by','not','no','so','yet','nor',
+    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+    'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'shall',
+    'and', 'or', 'but', 'if', 'that', 'this', 'these', 'those', 'it', 'its',
+    'in', 'on', 'at', 'to', 'for', 'of', 'by', 'not', 'no', 'so', 'yet', 'nor',
 ]);
 
 function fallbackChunks(sentence) {
@@ -123,7 +142,13 @@ export const prepareText = async (req, res) => {
         if (!sentences.length) {
             return res.status(400).json({ error: 'Không tách được câu. Đảm bảo đây là văn bản tiếng Anh.' });
         }
-        const exercises = sentences.map(buildBlankedSentence);
+        // Apply cleanOriginal to remove stray quotes from each sentence
+        const exercises = sentences.map(s => {
+            const built = buildBlankedSentence(s);
+            built.original = cleanOriginal(built.original);
+            built.blanks = built.blanks;
+            return built;
+        });
         return res.json({ mode: 'text', exercises, total: exercises.length });
     } catch (err) {
         console.error('[dictation] prepareText:', err);
@@ -274,11 +299,11 @@ function parseCaptionXml(xml) {
         let sm;
         while ((sm = sRegex.exec(innerXml)) !== null) {
             hasS = true;
-            const fullTag = sm[0]; 
+            const fullTag = sm[0];
             const tMatch = fullTag.match(/t="(\d+)"/);
             let offset = 0;
             if (tMatch) offset = parseInt(tMatch[1], 10) / 1000;
-            
+
             const text = decodeHtml(sm[1]).trim();
             // Use dur: 0 for now, we will calculate it based on next item's start
             if (text) items.push({ start: pStart + offset, dur: 0, text });
@@ -309,7 +334,7 @@ function parseCaptionXml(xml) {
                 // Determine word duration spanning to the next word
                 item.dur = Math.max(0.1, nextItem.start - item.start);
                 // Cap duration to 1.5s in case of a very long pause before next word
-                if (item.dur > 1.5) item.dur = Math.max(0.1, item.text.length * 0.08); 
+                if (item.dur > 1.5) item.dur = Math.max(0.1, item.text.length * 0.08);
             } else {
                 // Very last word fallback: approximate based on chars
                 item.dur = Math.max(0.1, item.text.length * 0.08);
@@ -339,7 +364,7 @@ function mergeIntoSentences(captions) {
     for (let i = 0; i < rawItems.length; i++) {
         const item = rawItems[i];
         if (bufStart === null) bufStart = item.start;
-        
+
         // Clean text spaces
         const t = item.text.replace(/\[.*?\]/g, '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
         if (!t) continue;
@@ -355,7 +380,9 @@ function mergeIntoSentences(captions) {
 
         // Break if we have a punctuation + reasonable length, OR speaker change, OR big gap, OR hard limit (40 words)
         // Also split at internal punctuation if using manual fallback text block
-        const hasInternalPunct = /[.!?]["']?\s+[A-Z]/.test(t) && !hasS_Tags_Enabled_Fallback(item);
+        // hasS_Tags_Enabled_Fallback: nếu item.dur > 0 thì đây là chunk fallback (không phải word-level)
+        const isFallbackChunk = item.dur > 0;
+        const hasInternalPunct = /[.!?]["']?\s+[A-Z]/.test(t) && isFallbackChunk;
 
         if ((endsWithPunct && wordCount >= 3) || nextIsSpeaker || nextIsFar || wordCount >= 40 || hasInternalPunct) {
             sentences.push({ text: bufText, start: bufStart, end: bufEnd });
@@ -383,6 +410,21 @@ function mergeIntoSentences(captions) {
 }
 
 
+// ── Lấy title video qua oEmbed (không cần API key) ─────────────────
+async function fetchVideoTitle(videoId) {
+    try {
+        const res = await fetch(
+            `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
+            { signal: AbortSignal.timeout(5000) }
+        );
+        if (!res.ok) return 'YouTube Video';
+        const data = await res.json();
+        return data.title || 'YouTube Video';
+    } catch {
+        return 'YouTube Video';
+    }
+}
+
 export const prepareYoutube = async (req, res) => {
     try {
         const { url } = req.body;
@@ -395,6 +437,21 @@ export const prepareYoutube = async (req, res) => {
             });
         }
 
+        // ── Cache check: trả về ngay nếu đã xử lý trước đó ──────────
+        const cached = await YoutubeCache.findOne({ videoId }).lean();
+        if (cached) {
+            console.log(`[dictation] Cache HIT for videoId=${videoId}`);
+            return res.json({
+                mode: 'youtube',
+                exercises: cached.exercises,
+                total: cached.total,
+                videoId,
+                title: cached.title,
+                fromCache: true,
+            });
+        }
+
+        // ── Cache MISS: gọi YouTube API ───────────────────────────────
         const captions = await fetchYouTubeCaptions(videoId);
         if (!captions.length) {
             return res.status(400).json({ error: 'Không lấy được phụ đề từ video này.' });
@@ -405,17 +462,70 @@ export const prepareYoutube = async (req, res) => {
             return res.status(400).json({ error: 'Không tách được câu từ phụ đề.' });
         }
 
+        // Build exercises và clean text
         const exercises = sentences.map(s => ({
-            original: s.text,
+            original: cleanOriginal(s.text),
             mode: 'youtube',
             start: s.start,
             end: s.end,
         }));
-        return res.json({ mode: 'youtube', exercises, total: exercises.length, videoId });
+
+        // Dịch toàn bộ transcript sang tiếng Việt — chia batch nhỏ 20 câu để tránh lỗi
+        try {
+            console.log(`[dictation] Bắt đầu dịch ${exercises.length} câu sang tiếng Việt (batch)...`);
+            const BATCH_SIZE = 20;
+            for (let bi = 0; bi < exercises.length; bi += BATCH_SIZE) {
+                const batch = exercises.slice(bi, bi + BATCH_SIZE);
+                const texts = batch.map(ex => ex.original);
+                try {
+                    // forceBatch: false → dịch từng câu riêng lẻ, không gộp
+                    const results = await translate(texts, { to: 'vi', forceBatch: false });
+                    const arr = Array.isArray(results) ? results : [results];
+                    for (let j = 0; j < batch.length; j++) {
+                        if (arr[j]?.text) batch[j].translated = arr[j].text;
+                    }
+                } catch (batchErr) {
+                    console.warn(`[dictation] Batch ${bi}-${bi + BATCH_SIZE} lỗi:`, batchErr.message);
+                }
+            }
+            const translated = exercises.filter(ex => ex.translated).length;
+            console.log(`[dictation] Dịch xong: ${translated}/${exercises.length} câu.`);
+        } catch (translateErr) {
+            console.error('[dictation] Lỗi dịch thuật (có thể bỏ qua):', translateErr.message);
+        }
+
+        // Lấy title và lưu cache (bất đồng bộ, không block response)
+        const title = await fetchVideoTitle(videoId);
+        YoutubeCache.findOneAndUpdate(
+            { videoId },
+            { videoId, url: url.trim(), title, exercises, total: exercises.length },
+            { upsert: true, new: true }
+        ).catch(e => console.warn('[dictation] Cache save error:', e.message));
+
+        return res.json({ mode: 'youtube', exercises, total: exercises.length, videoId, title });
     } catch (err) {
         console.error('[dictation] prepareYoutube error:', err.message);
         return res.status(500).json({
             error: err.message || 'Lỗi khi tải phụ đề YouTube. Thử video khác hoặc kiểm tra phụ đề.',
         });
+    }
+};
+
+// ── GET /dictation/shared-library ────────────────────────────────────
+/**
+ * Trả về danh sách 20 video YouTube đã được xử lý và lưu cache.
+ * Dùng để hiển thị "thư viện chung" cho người dùng mới chọn nhanh.
+ */
+export const getSharedLibrary = async (req, res) => {
+    try {
+        const videos = await YoutubeCache.find({})
+            .select('videoId url title total createdAt -_id')
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .lean();
+        return res.json({ data: videos });
+    } catch (err) {
+        console.error('[dictation] getSharedLibrary error:', err.message);
+        return res.status(500).json({ error: 'Lỗi khi tải thư viện.' });
     }
 };
