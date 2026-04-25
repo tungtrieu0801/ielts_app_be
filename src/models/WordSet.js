@@ -39,6 +39,12 @@ const wordSetSchema = new mongoose.Schema(
             ref: "WordSet",
             default: null,
         },
+        folderId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Folder",
+            default: null,
+            index: true,
+        },
     },
     {
         timestamps: true,

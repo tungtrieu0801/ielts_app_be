@@ -9,11 +9,20 @@ const getUserMongoId = async (googleId) => {
     return user;
 };
 
-// GET /wordsets — lấy tất cả bộ từ của user hiện tại
+// GET /wordsets — lấy bộ từ của user (có thể lọc theo folderId)
 export const getWordSets = async (req, res) => {
     try {
         const { _id: userId } = await getUserMongoId(req.user.id);
-        const sets = await WordSet.find({ userId }).sort({ updatedAt: -1 }).lean();
+        const { folderId } = req.query;
+
+        const query = { userId };
+        if (folderId === "root" || !folderId) {
+            query.folderId = null;
+        } else {
+            query.folderId = folderId;
+        }
+
+        const sets = await WordSet.find(query).sort({ updatedAt: -1 }).lean();
         res.json({ data: sets });
     } catch (err) {
         res.status(500).json({ message: err.message });
@@ -55,7 +64,7 @@ export const getPublicSets = async (req, res) => {
 export const createWordSet = async (req, res) => {
     try {
         const { _id: userId } = await getUserMongoId(req.user.id);
-        const { title, description, color, isPublic } = req.body;
+        const { title, description, color, isPublic, folderId } = req.body;
 
         if (!title?.trim()) {
             return res.status(400).json({ message: "Title is required" });
@@ -66,6 +75,7 @@ export const createWordSet = async (req, res) => {
             description: description?.trim() || "",
             color: color || "blue",
             isPublic: isPublic === true,
+            folderId: folderId || null,
             userId,
         });
         res.status(201).json({ data: set });
