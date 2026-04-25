@@ -429,12 +429,28 @@ export const getStudySchedule = async (req, res) => {
         // Only return first 6 buckets for cleanliness
         const timeline = [...buckets.values()].slice(0, 6);
 
+        // 4. Suggest a set that has due or new cards
+        const firstDueCard = await UserCard.findOne({
+            userId,
+            $or: [
+                { status: "NEW" },
+                { status: { $in: ["LEARNING", "REVIEW"] }, nextReview: { $lte: now } },
+            ],
+        }).select("wordId").lean();
+
+        let suggestedSetId = null;
+        if (firstDueCard) {
+            const word = await Word.findById(firstDueCard.wordId).select("setId").lean();
+            if (word) suggestedSetId = word.setId;
+        }
+
         res.json({
             data: {
                 availableNow,
                 nextReviewAt,
                 minutesUntilNext,
                 timeline,
+                suggestedSetId,
             },
         });
     } catch (err) {
