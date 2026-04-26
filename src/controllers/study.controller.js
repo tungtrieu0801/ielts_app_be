@@ -53,6 +53,85 @@ const ensureUserCards = async (userId, wordIds) => {
     }
 };
 
+// ─── GET /study/global-session ───────────────────────────────────────────────
+export const getGlobalStudySession = async (req, res) => {
+    try {
+        const userId = await getUserMongoId(req.user.id);
+        const now = new Date();
+
+        // 1. Fetch ALL due cards across all sets
+        const dueCards = await UserCard.find({
+            userId,
+            status: { $in: ["LEARNING", "REVIEW"] },
+            nextReview: { $lte: now },
+        })
+            .sort({ nextReview: 1 })
+            .limit(SESSION_LIMIT)
+            .lean();
+
+        let sessionCards = [...dueCards];
+
+        // 2. If slots left, fetch NEW cards across all sets
+        const remaining = SESSION_LIMIT - sessionCards.length;
+        if (remaining > 0) {
+            const newCards = await UserCard.find({
+                userId,
+                status: "NEW",
+            })
+                .sort({ createdAt: 1 })
+                .limit(remaining)
+                .lean();
+            sessionCards = [...sessionCards, ...newCards];
+        }
+
+        // 3. If still empty, check for unactivated words
+        if (sessionCards.length === 0) {
+            const allWords = await Word.find({ userId }).select("_id").limit(SESSION_LIMIT).lean();
+            const wordIds = allWords.map(w => w._id);
+            await ensureUserCards(userId, wordIds);
+            
+            sessionCards = await UserCard.find({
+                userId,
+                wordId: { $in: wordIds },
+                status: "NEW"
+            }).limit(SESSION_LIMIT).lean();
+        }
+
+        if (sessionCards.length === 0) {
+            return res.json({ data: [], mode: "all_done", nextReviewAt: null, total: 0 });
+        }
+
+        // Join word data
+        const wordIds = sessionCards.map(c => c.wordId);
+        const words = await Word.find({ _id: { $in: wordIds } }).lean();
+        const wordMap = Object.fromEntries(words.map(w => [w._id.toString(), w]));
+
+        const result = sessionCards.map((card) => {
+            const word = wordMap[card.wordId.toString()];
+            return {
+                ...word,
+                cardId: card._id,
+                srs: {
+                    status: card.status,
+                    level: card.level,
+                    interval: card.interval,
+                    nextReview: card.nextReview,
+                },
+            };
+        });
+
+        res.json({
+            data: result,
+            mode: dueCards.length > 0 ? "srs_review" : "new_words",
+            total: result.length,
+            isGlobal: true
+        });
+    } catch (err) {
+        console.error("[study] getGlobalStudySession error:", err);
+        res.status(500).json({ message: err.message });
+    }
+};
+
 // ─── GET /study/:setId/session ───────────────────────────────────────────────
 
 export const getStudySession = async (req, res) => {
@@ -444,18 +523,28 @@ export const getStudySchedule = async (req, res) => {
         // 4. Suggest a set that has due or new cards
         let suggestedSetId = null;
 
-        // 4a. Try active cards first
+        // 4a. Try DUE cards first (prioritize review)
         const firstDueCard = await UserCard.findOne({
             userId,
-            $or: [
-                { status: "NEW" },
-                { status: { $in: ["LEARNING", "REVIEW"] }, nextReview: { $lte: now } },
-            ],
+            status: { $in: ["LEARNING", "REVIEW"] },
+            nextReview: { $lte: now },
         }).select("wordId").lean();
 
         if (firstDueCard) {
             const word = await Word.findById(firstDueCard.wordId).select("setId").lean();
             if (word) suggestedSetId = word.setId;
+        }
+
+        // 4b. If no due cards, try NEW cards
+        if (!suggestedSetId) {
+            const firstNewCard = await UserCard.findOne({
+                userId,
+                status: "NEW",
+            }).select("wordId").lean();
+            if (firstNewCard) {
+                const word = await Word.findById(firstNewCard.wordId).select("setId").lean();
+                if (word) suggestedSetId = word.setId;
+            }
         }
 
         // 4b. If no active cards, find first unactivated set (one with words but no usercards)

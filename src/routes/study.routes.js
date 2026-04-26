@@ -2,6 +2,7 @@ import express from "express";
 import { verifyToken } from "../middleware/auth.middleware.js";
 import {
     getStudySession,
+    getGlobalStudySession,
     batchSubmit,
     getStudyStats,
     getStreakHeatmap,
@@ -17,6 +18,7 @@ router.get("/stats", getStudyStats);
 router.get("/heatmap", getStreakHeatmap);
 router.get("/streak", getStreakInfo);
 router.get("/schedule", getStudySchedule);
+router.get("/global-session", getGlobalStudySession);
 router.get("/:setId/session", getStudySession);
 router.post("/batch-submit", batchSubmit);
 
