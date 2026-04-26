@@ -126,3 +126,19 @@ Response: { exercises, videoId, title, total }
 
 `GET /dictation/shared-library` — trả về 20 video cache mới nhất (videoId, title, total, url), dùng để hiển thị thư viện chung cho người dùng chọn nhanh.
 
+---
+
+### 5. Các chỉ số học tập (Stats & Heatmap)
+
+Hệ thống phân tách rõ ràng giữa "lượng kiến thức" và "cường độ lao động" thông qua hai chỉ số:
+
+*   **Từ vựng đã học (Unique Words)** — Hiển thị trên thẻ Dashboard:
+    *   **Định nghĩa**: Tổng số lượng **từ vựng duy nhất** (UserCards) mà người dùng đã thực hiện ôn tập hoặc học mới trong ngày.
+    *   **Cách tính**: Đếm số bản ghi trong collection `UserCard` có trường `lastReviewed` thuộc ngày hiện tại.
+    *   **Ý nghĩa**: Cho biết hôm nay bạn đã củng cố được bao nhiêu "mục" từ vựng. Dù bạn học một từ 10 lần trong ngày, con số này vẫn chỉ tăng 1.
+
+*   **Lượt ôn tập (Total Reviews)** — Hiển thị trong tooltip của Heatmap (Lịch sử học tập):
+    *   **Định nghĩa**: Tổng số **lượt thao tác** (số lần nhấn nút Again/Good...) mà người dùng đã thực hiện.
+    *   **Cách tính**: Dữ liệu được lưu trong collection `StudyLog`. Mỗi khi hoàn thành một lượt học và submit, hệ thống sẽ cộng dồn số lượng card đã trả lời vào trường `count` của ngày hôm đó.
+    *   **Ý nghĩa**: Phản ánh **cường độ làm việc** thực tế. Nếu bạn gặp từ khó và phải nhấn "Again" nhiều lần, con số này sẽ cao hơn nhiều so với số lượng từ vựng duy nhất, thể hiện sự nỗ lực vượt khó của người học.
+
