@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Word from "../models/Word.js";
 import WordSet from "../models/WordSet.js";
 import UserCard from "../models/UserCard.js";
@@ -73,31 +74,49 @@ export const getGlobalStudySession = async (req, res) => {
         // 2. If still have room, check for unactivated words (not yet in UserCard)
         if (sessionCards.length < SESSION_LIMIT) {
             const remainingForActivation = SESSION_LIMIT - sessionCards.length;
-            // Priority: newest words first to ensure newly added sets can be learned immediately
-            const unactivatedWords = await Word.find({ userId })
-                .sort({ createdAt: -1 })
-                .select("_id")
-                .limit(SESSION_LIMIT) // Grab a bunch but we'll only use what we need
-                .lean();
             
-            const wordIds = unactivatedWords.map(w => w._id);
-            await ensureUserCards(userId, wordIds);
+            // Find words belonging to user that DO NOT have a UserCard yet
+            // This is the most reliable way to find unactivated words
+            const wordsToActivate = await Word.aggregate([
+                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+                {
+                    $lookup: {
+                        from: "usercards",
+                        let: { wId: "$_id", uId: "$userId" },
+                        pipeline: [
+                            { 
+                                $match: { 
+                                    $expr: { 
+                                        $and: [ 
+                                            { $eq: ["$wordId", "$$wId"] }, 
+                                            { $eq: ["$userId", "$$uId"] } 
+                                        ] 
+                                    } 
+                                } 
+                            }
+                        ],
+                        as: "card"
+                    }
+                },
+                { $match: { card: { $size: 0 } } },
+                { $sort: { createdAt: -1 } },
+                { $limit: remainingForActivation }
+            ]);
 
-            const activatedNewCards = await UserCard.find({
-                userId,
-                wordId: { $in: wordIds },
-                status: "NEW"
-            })
-            .sort({ createdAt: -1 })
-            .limit(remainingForActivation)
-            .lean();
+            if (wordsToActivate.length > 0) {
+                const wordIdsToActivate = wordsToActivate.map(w => w._id);
+                await ensureUserCards(userId, wordIdsToActivate);
 
-            // Avoid duplicates if any
-            const existingIds = new Set(sessionCards.map(c => c._id.toString()));
-            for (const card of activatedNewCards) {
-                if (!existingIds.has(card._id.toString())) {
+                const activatedNewCards = await UserCard.find({
+                    userId,
+                    wordId: { $in: wordIdsToActivate },
+                    status: "NEW"
+                })
+                .sort({ createdAt: -1 })
+                .lean();
+
+                for (const card of activatedNewCards) {
                     sessionCards.push(card);
-                    existingIds.add(card._id.toString());
                 }
             }
         }
