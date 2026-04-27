@@ -29,17 +29,24 @@ export const getWordSets = async (req, res) => {
     }
 };
 
-// GET /wordsets/public — bộ từ public của người dùng khác
+// GET /wordsets/public — bộ từ public của người dùng khác (có phân trang)
 export const getPublicSets = async (req, res) => {
     try {
         const { _id: userId } = await getUserMongoId(req.user.id);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
 
-        const sets = await WordSet.find({
+        const baseQuery = {
             isPublic: true,
             userId: { $ne: userId },
-        })
+        };
+
+        const total = await WordSet.countDocuments(baseQuery);
+        const sets = await WordSet.find(baseQuery)
             .sort({ updatedAt: -1 })
-            .limit(100)
+            .skip(skip)
+            .limit(limit)
             .lean();
 
         // Attach owner info
@@ -54,7 +61,12 @@ export const getPublicSets = async (req, res) => {
             owner: ownerMap[s.userId.toString()] || null,
         }));
 
-        res.json({ data: result });
+        res.json({ 
+            data: result, 
+            total,
+            page,
+            totalPages: Math.ceil(total / limit)
+        });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
