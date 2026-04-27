@@ -89,7 +89,7 @@ export const getGlobalStudySession = async (req, res) => {
             const allWords = await Word.find({ userId }).select("_id").limit(SESSION_LIMIT).lean();
             const wordIds = allWords.map(w => w._id);
             await ensureUserCards(userId, wordIds);
-            
+
             sessionCards = await UserCard.find({
                 userId,
                 wordId: { $in: wordIds },
@@ -301,6 +301,59 @@ export const batchSubmit = async (req, res) => {
             },
             { upsert: true }
         );
+
+        // --- Recalculate Streak for Ranking ---
+        const oneYearAgo = new Date(today);
+        oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+        const logs = await StudyLog.find({
+            userId,
+            date: { $gte: oneYearAgo },
+            wordsReviewed: { $gt: 0 },
+        }).select("date").sort({ date: -1 }).lean();
+
+        let currentStreak = 0;
+        let longestStreak = 0;
+
+        if (logs.length > 0) {
+            const daySet = new Set(logs.map(l => l.date.toISOString().split("T")[0]));
+            const todayStr = today.toISOString().split("T")[0];
+            const yesterdayDate = new Date(today);
+            yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
+            const yesterdayStr = yesterdayDate.toISOString().split("T")[0];
+
+            const startFromToday = daySet.has(todayStr);
+            const startFromYesterday = !startFromToday && daySet.has(yesterdayStr);
+
+            if (startFromToday || startFromYesterday) {
+                const checkDate = new Date(startFromToday ? today : yesterdayDate);
+                while (true) {
+                    const checkStr = checkDate.toISOString().split("T")[0];
+                    if (daySet.has(checkStr)) {
+                        currentStreak++;
+                        checkDate.setUTCDate(checkDate.getUTCDate() - 1);
+                    } else break;
+                }
+            }
+
+            // Longest streak
+            const sortedDays = [...daySet].sort();
+            let tempStreak = 1;
+            longestStreak = 1;
+            for (let i = 1; i < sortedDays.length; i++) {
+                const diff = (new Date(sortedDays[i]) - new Date(sortedDays[i - 1])) / 86400000;
+                if (diff === 1) {
+                    tempStreak++;
+                    longestStreak = Math.max(longestStreak, tempStreak);
+                } else {
+                    tempStreak = 1;
+                }
+            }
+        }
+
+        // Update User model
+        await User.findByIdAndUpdate(userId, { currentStreak, longestStreak });
+        // --- End Recalculate Streak ---
 
         res.json({
             success: true,
@@ -576,6 +629,47 @@ export const getStudySchedule = async (req, res) => {
         });
     } catch (err) {
         console.error("[study] getStudySchedule error:", err);
+        res.status(500).json({ message: err.message });
+    }
+};
+
+// ─── GET /study/ranking ──────────────────────────────────────────────────────
+export const getRanking = async (req, res) => {
+    try {
+        const topUsers = await User.find({})
+            .sort({ currentStreak: -1 })
+            .limit(10)
+            .select("name picture currentStreak")
+            .lean();
+
+        // Get current user's rank
+        const userId = await getUserMongoId(req.user.id);
+        const currentUser = await User.findById(userId).select("name picture currentStreak").lean();
+        
+        let currentUserRank = null;
+        if (currentUser) {
+            // Check if user is in top 10
+            const index = topUsers.findIndex(u => u._id.toString() === userId.toString());
+            if (index !== -1) {
+                currentUserRank = index + 1;
+            } else {
+                // If not in top 10, count how many users have a higher streak
+                const higherStreakCount = await User.countDocuments({ currentStreak: { $gt: currentUser.currentStreak } });
+                currentUserRank = higherStreakCount + 1;
+            }
+        }
+
+        res.json({ 
+            data: {
+                topUsers,
+                currentUser: currentUser ? {
+                    ...currentUser,
+                    rank: currentUserRank
+                } : null
+            }
+        });
+    } catch (err) {
+        console.error("[study] getRanking error:", err);
         res.status(500).json({ message: err.message });
     }
 };

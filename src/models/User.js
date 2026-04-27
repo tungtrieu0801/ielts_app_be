@@ -42,6 +42,15 @@ const userSchema = new mongoose.Schema(
             type: Date,
             default: Date.now,
         },
+        currentStreak: {
+            type: Number,
+            default: 0,
+            index: true,
+        },
+        longestStreak: {
+            type: Number,
+            default: 0,
+        },
     },
     {
         // Tự động tạo trường createdAt (ngày tham gia) và updatedAt (ngày cập nhật)
