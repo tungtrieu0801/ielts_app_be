@@ -457,6 +457,7 @@ export const getStreakInfo = async (req, res) => {
             .lean();
 
         if (logs.length === 0) {
+            await User.findByIdAndUpdate(userId, { currentStreak: 0, longestStreak: 0 });
             return res.json({ data: { currentStreak: 0, longestStreak: 0, totalStudyDays: 0 } });
         }
 
@@ -492,6 +493,8 @@ export const getStreakInfo = async (req, res) => {
                 tempStreak = 1;
             }
         }
+
+        await User.findByIdAndUpdate(userId, { currentStreak, longestStreak });
 
         res.json({ data: { currentStreak, longestStreak, totalStudyDays: daySet.size } });
     } catch (err) {
@@ -636,18 +639,24 @@ export const getStudySchedule = async (req, res) => {
 // ─── GET /study/ranking ──────────────────────────────────────────────────────
 export const getRanking = async (req, res) => {
     try {
-        const topUsers = await User.find({})
+        const topUsersRaw = await User.find({})
             .sort({ currentStreak: -1 })
             .limit(10)
             .select("name picture currentStreak")
             .lean();
 
+        const topUsers = topUsersRaw.map(u => ({ ...u, currentStreak: u.currentStreak || 0 }));
+
         // Get current user's rank
         const userId = await getUserMongoId(req.user.id);
-        const currentUser = await User.findById(userId).select("name picture currentStreak").lean();
+        let currentUserRaw = await User.findById(userId).select("name picture currentStreak").lean();
         
         let currentUserRank = null;
-        if (currentUser) {
+        let currentUser = null;
+
+        if (currentUserRaw) {
+            currentUser = { ...currentUserRaw, currentStreak: currentUserRaw.currentStreak || 0 };
+            
             // Check if user is in top 10
             const index = topUsers.findIndex(u => u._id.toString() === userId.toString());
             if (index !== -1) {
