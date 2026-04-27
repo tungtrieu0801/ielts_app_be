@@ -59,42 +59,62 @@ export const getGlobalStudySession = async (req, res) => {
         const userId = await getUserMongoId(req.user.id);
         const now = new Date();
 
-        // 1. Fetch ALL due cards across all sets
-        const dueCards = await UserCard.find({
+        // 1. First, fetch NEW cards (activated but not yet learned)
+        const newCards = await UserCard.find({
             userId,
-            status: { $in: ["LEARNING", "REVIEW"] },
-            nextReview: { $lte: now },
+            status: "NEW",
         })
-            .sort({ nextReview: 1 })
+            .sort({ createdAt: -1 })
             .limit(SESSION_LIMIT)
             .lean();
 
-        let sessionCards = [...dueCards];
+        let sessionCards = [...newCards];
 
-        // 2. If slots left, fetch NEW cards across all sets
-        const remaining = SESSION_LIMIT - sessionCards.length;
-        if (remaining > 0) {
-            const newCards = await UserCard.find({
-                userId,
-                status: "NEW",
-            })
-                .sort({ createdAt: 1 })
-                .limit(remaining)
+        // 2. If still have room, check for unactivated words (not yet in UserCard)
+        if (sessionCards.length < SESSION_LIMIT) {
+            const remainingForActivation = SESSION_LIMIT - sessionCards.length;
+            // Priority: newest words first to ensure newly added sets can be learned immediately
+            const unactivatedWords = await Word.find({ userId })
+                .sort({ createdAt: -1 })
+                .select("_id")
+                .limit(SESSION_LIMIT) // Grab a bunch but we'll only use what we need
                 .lean();
-            sessionCards = [...sessionCards, ...newCards];
-        }
-
-        // 3. If still empty, check for unactivated words
-        if (sessionCards.length === 0) {
-            const allWords = await Word.find({ userId }).select("_id").limit(SESSION_LIMIT).lean();
-            const wordIds = allWords.map(w => w._id);
+            
+            const wordIds = unactivatedWords.map(w => w._id);
             await ensureUserCards(userId, wordIds);
 
-            sessionCards = await UserCard.find({
+            const activatedNewCards = await UserCard.find({
                 userId,
                 wordId: { $in: wordIds },
                 status: "NEW"
-            }).limit(SESSION_LIMIT).lean();
+            })
+            .sort({ createdAt: -1 })
+            .limit(remainingForActivation)
+            .lean();
+
+            // Avoid duplicates if any
+            const existingIds = new Set(sessionCards.map(c => c._id.toString()));
+            for (const card of activatedNewCards) {
+                if (!existingIds.has(card._id.toString())) {
+                    sessionCards.push(card);
+                    existingIds.add(card._id.toString());
+                }
+            }
+        }
+
+        // 3. If still have room, fetch DUE cards (SRS reviews)
+        if (sessionCards.length < SESSION_LIMIT) {
+            const remainingForReviews = SESSION_LIMIT - sessionCards.length;
+            const dueCards = await UserCard.find({
+                userId,
+                status: { $in: ["LEARNING", "REVIEW"] },
+                nextReview: { $lte: now },
+            })
+                .sort({ nextReview: 1 })
+                .limit(remainingForReviews)
+                .lean();
+            
+            sessionCards = [...sessionCards, ...dueCards];
         }
 
         if (sessionCards.length === 0) {
@@ -120,9 +140,11 @@ export const getGlobalStudySession = async (req, res) => {
             };
         });
 
+        const hasNew = sessionCards.some(c => c.status === "NEW");
+
         res.json({
             data: result,
-            mode: dueCards.length > 0 ? "srs_review" : "new_words",
+            mode: hasNew ? "new_words" : "srs_review",
             total: result.length,
             isGlobal: true
         });
