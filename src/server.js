@@ -16,6 +16,8 @@ import folderRoutes from "./routes/folder.routes.js";
 import connectDB from "./config/db.js";
 import ChatMessage from "./models/ChatMessage.js";
 
+import { setupSocket } from "./services/socket.service.js";
+
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -34,45 +36,7 @@ app.use(express.json());
 app.use(passport.initialize());
 
 // Socket.io logic
-io.on("connection", async (socket) => {
-    console.log("⚡ User connected:", socket.id);
-
-    try {
-        const history = await ChatMessage.find().sort({ timestamp: -1 }).limit(15).lean();
-        socket.emit("chat_history", history.reverse());
-    } catch (err) {
-        console.error("Error loading chat history:", err);
-    }
-
-    socket.on("load_more_history", async (skip) => {
-        try {
-            const older = await ChatMessage.find().sort({ timestamp: -1 }).skip(skip).limit(15).lean();
-            socket.emit("older_messages", older.reverse());
-        } catch (err) {
-            console.error("Error loading older messages:", err);
-        }
-    });
-
-    socket.on("send_message", async (data) => {
-        try {
-            const newMsg = await ChatMessage.create({
-                userId: data.userId,
-                sender: data.sender,
-                picture: data.picture,
-                text: data.text,
-                isAdmin: data.isAdmin || false,
-                replyTo: data.replyTo || null,
-            });
-            io.emit("receive_message", newMsg);
-        } catch (err) {
-            console.error("Error saving message:", err);
-        }
-    });
-
-    socket.on("disconnect", () => {
-        console.log("🔥 User disconnected:", socket.id);
-    });
-});
+setupSocket(io);
 
 // Routes
 app.use("/auth", authRoutes);
