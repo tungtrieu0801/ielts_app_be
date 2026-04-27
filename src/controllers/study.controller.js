@@ -179,31 +179,32 @@ export const getStudySession = async (req, res) => {
 
         const now = new Date();
 
-        // 1. Due cards (nextReview <= now)
-        const dueCards = await UserCard.find({
+        // 1. First, fetch NEW cards (not yet learned)
+        const newCards = await UserCard.find({
             userId,
             wordId: { $in: wordIds },
-            status: { $in: ["LEARNING", "REVIEW"] },
-            nextReview: { $lte: now },
+            status: "NEW",
         })
-            .sort({ nextReview: 1 })
+            .sort({ createdAt: 1 }) // Use 1 for sets to learn in order added
             .limit(SESSION_LIMIT)
             .lean();
 
-        let sessionCards = [...dueCards];
+        let sessionCards = [...newCards];
 
-        // 2. Fill remaining slots with NEW cards (up to SESSION_LIMIT)
+        // 2. Fill remaining slots with DUE cards (SRS reviews)
         const remaining = SESSION_LIMIT - sessionCards.length;
         if (remaining > 0) {
-            const newCards = await UserCard.find({
+            const dueCards = await UserCard.find({
                 userId,
                 wordId: { $in: wordIds },
-                status: "NEW",
+                status: { $in: ["LEARNING", "REVIEW"] },
+                nextReview: { $lte: now },
             })
-                .sort({ createdAt: 1 })
-                .limit(remaining)   // fill the full remaining quota
+                .sort({ nextReview: 1 })
+                .limit(remaining)
                 .lean();
-            sessionCards = [...sessionCards, ...newCards];
+            
+            sessionCards = [...sessionCards, ...dueCards];
         }
 
         if (sessionCards.length === 0) {
@@ -239,9 +240,11 @@ export const getStudySession = async (req, res) => {
             };
         });
 
+        const hasNew = sessionCards.some(c => c.status === "NEW");
+
         res.json({
             data: result,
-            mode: dueCards.length > 0 ? "srs_review" : "new_words",
+            mode: hasNew ? "new_words" : "srs_review",
             total: result.length,
         });
     } catch (err) {
@@ -416,14 +419,22 @@ export const getStudyStats = async (req, res) => {
 
         // Words that haven't been "activated" (don't have a UserCard yet) are also NEW
         const unactivatedCount = Math.max(0, totalWords - totalUserCards);
-        const actualDueCards = dueCards + unactivatedCount;
+        const newTotal = newCards + unactivatedCount;
+        
+        // Match the button logic: If there are new words, they are the priority
+        // If there are new words, dueCards count for the dashboard will reflect the sum
+        // But we can label it differently or keep it as is. 
+        // User wants them to "be the same", meaning if the button takes new words, 
+        // the count should reflect that.
+        const totalAvailable = newTotal + dueCards;
 
         res.json({
             data: {
                 totalWords,
                 totalSets,
-                dueCards: actualDueCards,
-                newCards: newCards + unactivatedCount,
+                dueCards: totalAvailable, // This is what shows on the "Học ngay" card
+                newTotal,
+                dueOnly: dueCards,
                 masteredCards,
                 reviewedToday,
             },
