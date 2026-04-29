@@ -60,18 +60,33 @@ export const getGlobalStudySession = async (req, res) => {
         const userId = await getUserMongoId(req.user.id);
         const now = new Date();
 
-        // 1. First, fetch NEW cards (activated but not yet learned)
-        const newCards = await UserCard.find({
+        // 1. First, fetch DUE cards (SRS reviews)
+        const dueCards = await UserCard.find({
             userId,
-            status: "NEW",
+            status: { $in: ["LEARNING", "REVIEW"] },
+            nextReview: { $lte: now },
         })
-            .sort({ createdAt: -1 })
+            .sort({ nextReview: 1 })
             .limit(SESSION_LIMIT)
             .lean();
 
-        let sessionCards = [...newCards];
+        let sessionCards = [...dueCards];
 
-        // 2. If still have room, check for unactivated words (not yet in UserCard)
+        // 2. If still have room, fetch NEW cards (activated but not yet learned)
+        if (sessionCards.length < SESSION_LIMIT) {
+            const remainingForNew = SESSION_LIMIT - sessionCards.length;
+            const newCards = await UserCard.find({
+                userId,
+                status: "NEW",
+            })
+                .sort({ createdAt: -1 })
+                .limit(remainingForNew)
+                .lean();
+
+            sessionCards = [...sessionCards, ...newCards];
+        }
+
+        // 3. If still have room, check for unactivated words (not yet in UserCard)
         if (sessionCards.length < SESSION_LIMIT) {
             const remainingForActivation = SESSION_LIMIT - sessionCards.length;
             
@@ -121,21 +136,6 @@ export const getGlobalStudySession = async (req, res) => {
             }
         }
 
-        // 3. If still have room, fetch DUE cards (SRS reviews)
-        if (sessionCards.length < SESSION_LIMIT) {
-            const remainingForReviews = SESSION_LIMIT - sessionCards.length;
-            const dueCards = await UserCard.find({
-                userId,
-                status: { $in: ["LEARNING", "REVIEW"] },
-                nextReview: { $lte: now },
-            })
-                .sort({ nextReview: 1 })
-                .limit(remainingForReviews)
-                .lean();
-            
-            sessionCards = [...sessionCards, ...dueCards];
-        }
-
         if (sessionCards.length === 0) {
             return res.json({ data: [], mode: "all_done", nextReviewAt: null, total: 0 });
         }
@@ -159,11 +159,11 @@ export const getGlobalStudySession = async (req, res) => {
             };
         });
 
-        const hasNew = sessionCards.some(c => c.status === "NEW");
+        const hasDue = sessionCards.some(c => c.status === "LEARNING" || c.status === "REVIEW");
 
         res.json({
             data: result,
-            mode: hasNew ? "new_words" : "srs_review",
+            mode: hasDue ? "srs_review" : "new_words",
             total: result.length,
             isGlobal: true
         });
@@ -198,32 +198,32 @@ export const getStudySession = async (req, res) => {
 
         const now = new Date();
 
-        // 1. First, fetch NEW cards (not yet learned)
-        const newCards = await UserCard.find({
+        // 1. First, fetch DUE cards (SRS reviews)
+        const dueCards = await UserCard.find({
             userId,
             wordId: { $in: wordIds },
-            status: "NEW",
+            status: { $in: ["LEARNING", "REVIEW"] },
+            nextReview: { $lte: now },
         })
-            .sort({ createdAt: 1 }) // Use 1 for sets to learn in order added
+            .sort({ nextReview: 1 })
             .limit(SESSION_LIMIT)
             .lean();
 
-        let sessionCards = [...newCards];
+        let sessionCards = [...dueCards];
 
-        // 2. Fill remaining slots with DUE cards (SRS reviews)
+        // 2. Fill remaining slots with NEW cards (not yet learned)
         const remaining = SESSION_LIMIT - sessionCards.length;
         if (remaining > 0) {
-            const dueCards = await UserCard.find({
+            const newCards = await UserCard.find({
                 userId,
                 wordId: { $in: wordIds },
-                status: { $in: ["LEARNING", "REVIEW"] },
-                nextReview: { $lte: now },
+                status: "NEW",
             })
-                .sort({ nextReview: 1 })
+                .sort({ createdAt: 1 }) // Use 1 for sets to learn in order added
                 .limit(remaining)
                 .lean();
             
-            sessionCards = [...sessionCards, ...dueCards];
+            sessionCards = [...sessionCards, ...newCards];
         }
 
         if (sessionCards.length === 0) {
@@ -259,11 +259,11 @@ export const getStudySession = async (req, res) => {
             };
         });
 
-        const hasNew = sessionCards.some(c => c.status === "NEW");
+        const hasDue = sessionCards.some(c => c.status === "LEARNING" || c.status === "REVIEW");
 
         res.json({
             data: result,
-            mode: hasNew ? "new_words" : "srs_review",
+            mode: hasDue ? "srs_review" : "new_words",
             total: result.length,
         });
     } catch (err) {
@@ -567,21 +567,18 @@ export const getStudySchedule = async (req, res) => {
         const userId = await getUserMongoId(req.user.id);
         const now = new Date();
 
-        // 1. Cards available right now (NEW + DUE)
-        const [availableCardsCount, totalWords, totalUserCards] = await Promise.all([
+        // 1. Cards available right now (ONLY SRS DUE CARDS)
+        const [availableNow, totalWords, totalUserCards] = await Promise.all([
             UserCard.countDocuments({
                 userId,
-                $or: [
-                    { status: "NEW" },
-                    { status: { $in: ["LEARNING", "REVIEW"] }, nextReview: { $lte: now } },
-                ],
+                status: { $in: ["LEARNING", "REVIEW"] },
+                nextReview: { $lte: now },
             }),
             Word.countDocuments({ userId }),
             UserCard.countDocuments({ userId }),
         ]);
 
         const unactivatedCount = Math.max(0, totalWords - totalUserCards);
-        const availableNow = availableCardsCount + unactivatedCount;
 
         // 2. Upcoming cards (nextReview > now, sorted ascending)
         const upcoming = await UserCard.find({
