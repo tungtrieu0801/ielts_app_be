@@ -418,23 +418,38 @@ export const getStudyStats = async (req, res) => {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
-        const [totalWords, totalSets, totalUserCards, dueCards, newCards, masteredCards, reviewedToday] =
-            await Promise.all([
-                Word.countDocuments({ userId }),
-                WordSet.countDocuments({ userId }),
-                UserCard.countDocuments({ userId }),
-                UserCard.countDocuments({
-                    userId,
-                    status: { $in: ["LEARNING", "REVIEW"] },
-                    nextReview: { $lte: now },
-                }),
-                UserCard.countDocuments({ userId, status: "NEW" }),
-                UserCard.countDocuments({ userId, level: 5 }),
-                UserCard.countDocuments({
-                    userId,
-                    lastReviewed: { $gte: todayStart },
-                }),
-            ]);
+        const [
+            totalWords,
+            totalSets,
+            totalUserCards,
+            dueCards,
+            newCards,
+            level1Count,
+            level2Count,
+            level3Count,
+            level4Count,
+            masteredCards,
+            reviewedToday
+        ] = await Promise.all([
+            Word.countDocuments({ userId }),
+            WordSet.countDocuments({ userId }),
+            UserCard.countDocuments({ userId }),
+            UserCard.countDocuments({
+                userId,
+                status: { $in: ["LEARNING", "REVIEW"] },
+                nextReview: { $lte: now },
+            }),
+            UserCard.countDocuments({ userId, status: "NEW" }),
+            UserCard.countDocuments({ userId, level: 1 }),
+            UserCard.countDocuments({ userId, level: 2 }),
+            UserCard.countDocuments({ userId, level: 3 }),
+            UserCard.countDocuments({ userId, level: 4 }),
+            UserCard.countDocuments({ userId, level: 5 }),
+            UserCard.countDocuments({
+                userId,
+                lastReviewed: { $gte: todayStart },
+            }),
+        ]);
 
         // Words that haven't been "activated" (don't have a UserCard yet) are also NEW
         const unactivatedCount = Math.max(0, totalWords - totalUserCards);
@@ -454,6 +469,10 @@ export const getStudyStats = async (req, res) => {
                 dueCards: totalAvailable, // This is what shows on the "Học ngay" card
                 newTotal,
                 dueOnly: dueCards,
+                level1Count,
+                level2Count,
+                level3Count,
+                level4Count,
                 masteredCards,
                 reviewedToday,
             },
