@@ -48,17 +48,20 @@ export const setupSocket = (io) => {
                 id: r.id,
                 name: r.name,
                 playerCount: r.players.length,
-                status: r.status
+                status: r.status,
+                isPrivate: r.isPrivate
             }));
             socket.emit("game_room_list", roomList);
         });
 
         // 2. Create Room
-        socket.on("game_create_room", ({ roomName, user }) => {
+        socket.on("game_create_room", ({ roomName, user, password }) => {
             const roomId = `room_${Date.now()}`;
             const newRoom = {
                 id: roomId,
                 name: roomName,
+                password: password || null,
+                isPrivate: !!password,
                 players: [{ ...user, socketId: socket.id, cards: [], score: 0 }],
                 status: "waiting",
                 words: [],
@@ -73,10 +76,11 @@ export const setupSocket = (io) => {
         });
 
         // 3. Join Room
-        socket.on("game_join_room", async ({ roomId, user }) => {
+        socket.on("game_join_room", async ({ roomId, user, password }) => {
             const room = rooms.get(roomId);
             if (!room) return socket.emit("game_error", "Phòng không tồn tại");
             if (room.players.length >= 2) return socket.emit("game_error", "Phòng đã đầy");
+            if (room.isPrivate && room.password !== password) return socket.emit("game_error", "Mật khẩu không chính xác");
 
             const player = { ...user, socketId: socket.id, cards: [], score: 0 };
             room.players.push(player);
@@ -105,8 +109,10 @@ export const setupSocket = (io) => {
             room.activeWord = word;
             room.phase = "answering";
             
+            const hint = word.english.split(' ').map(w => '_'.repeat(w.length)).join('   ');
+            
             io.to(roomId).emit("game_card_picked", {
-                word: { _id: word._id, english: word.english, pronunciation: word.pronunciation },
+                word: { _id: word._id, vietnamese: word.vietnamese, hint },
                 challengerId: socket.id,
                 phase: "answering"
             });
@@ -122,7 +128,7 @@ export const setupSocket = (io) => {
             if (answerer.socketId !== socket.id) return; // Only opponent can answer
 
             const word = room.activeWord;
-            const isCorrect = word.vietnamese.toLowerCase().trim() === answer.toLowerCase().trim();
+            const isCorrect = word.english.toLowerCase().trim() === answer.toLowerCase().trim();
             
             if (isCorrect) {
                 room.scores[socket.id] += 1;
@@ -149,9 +155,27 @@ export const setupSocket = (io) => {
                     scores: room.scores,
                     currentTurn: room.currentTurn,
                     phase: "picking",
-                    lastResult: { socketId: socket.id, isCorrect, correctMeaning: word.vietnamese },
+                    lastResult: { socketId: socket.id, isCorrect, correctMeaning: word.english },
                     players: room.players
                 });
+            }
+        });
+
+        // 6. Leave Room
+        socket.on("game_leave_room", ({ roomId }) => {
+            const room = rooms.get(roomId);
+            if (!room) return;
+            const playerIdx = room.players.findIndex(p => p.socketId === socket.id);
+            if (playerIdx !== -1) {
+                room.players.splice(playerIdx, 1);
+                socket.leave(roomId);
+                if (room.players.length === 0) {
+                    rooms.delete(roomId);
+                } else {
+                    room.status = "waiting";
+                    io.to(roomId).emit("game_player_left", socket.id);
+                }
+                io.emit("game_room_list", getActiveRooms());
             }
         });
 
@@ -180,7 +204,8 @@ const getActiveRooms = () => {
         id: r.id,
         name: r.name,
         playerCount: r.players.length,
-        status: r.status
+        status: r.status,
+        isPrivate: r.isPrivate
     }));
 };
 
