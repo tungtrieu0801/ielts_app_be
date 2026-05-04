@@ -61,8 +61,8 @@ export const getPublicSets = async (req, res) => {
             owner: ownerMap[s.userId.toString()] || null,
         }));
 
-        res.json({ 
-            data: result, 
+        res.json({
+            data: result,
             total,
             page,
             totalPages: Math.ceil(total / limit)
@@ -178,13 +178,12 @@ export const forkWordSet = async (req, res) => {
                 ...rest,
                 setId: newSet._id,
                 userId,
-                // Reset SRS fields
-                level: 0,
+                // Reset SRS fields only — 'level' (C1/C2/B2) is preserved via ...rest
                 interval: 0,
                 easeFactor: 2.5,
                 repetition: 0,
                 lastReviewed: null,
-                nextReview: null,
+                nextReview: null
             }));
             await Word.insertMany(wordCopies);
 
