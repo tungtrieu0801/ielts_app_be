@@ -482,6 +482,56 @@ export const getStudyStats = async (req, res) => {
     }
 };
 
+// ─── GET /study/:setId/stats ─────────────────────────────────────────────────
+/**
+ * Returns SRS level breakdown for a specific word set.
+ */
+export const getSetStats = async (req, res) => {
+    try {
+        const userId = await getUserMongoId(req.user.id);
+        const { setId } = req.params;
+
+        const words = await Word.find({ setId, userId }).select("_id").lean();
+        const wordIds = words.map(w => w._id);
+
+        if (wordIds.length === 0) {
+            return res.json({
+                data: { total: 0, newCount: 0, level0: 0, level1: 0, level2: 0, level3: 0, level4: 0, level5: 0 }
+            });
+        }
+
+        const [total, cards] = await Promise.all([
+            Promise.resolve(wordIds.length),
+            UserCard.find({ userId, wordId: { $in: wordIds } }).select("level status").lean(),
+        ]);
+
+        const counts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+        let newCount = 0;
+        for (const c of cards) {
+            if (c.status === "NEW") newCount++;
+            counts[c.level] = (counts[c.level] || 0) + 1;
+        }
+        // Words without a UserCard are also NEW
+        const unactivated = total - cards.length;
+        newCount += unactivated;
+
+        res.json({
+            data: {
+                total,
+                newCount,
+                level0: counts[0],
+                level1: counts[1],
+                level2: counts[2],
+                level3: counts[3],
+                level4: counts[4],
+                level5: counts[5],
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
 // ─── GET /study/heatmap ──────────────────────────────────────────────────────
 export const getStreakHeatmap = async (req, res) => {
     try {
