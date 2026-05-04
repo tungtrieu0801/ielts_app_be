@@ -2,7 +2,7 @@
  * SRS 5-Level Engine
  *
  * Level → Interval mapping:
- *   0 → 10 minutes (learning phase — not yet graduated)
+ *   0 → 30 minutes (learning phase — not yet graduated)
  *   1 → 1 day
  *   2 → 3 days
  *   3 → 7 days
@@ -10,13 +10,13 @@
  *   5 → 30 days
  *
  * Learning phase rules (level === 0):
- *   AGAIN → level 0, +10 min
- *   HARD  → level 0, +10 min  (NOT graduated — still learning)
+ *   AGAIN → level 0, +30 min
+ *   HARD  → level 0, +30 min  (NOT graduated — still learning)
  *   GOOD  → level 1, +1 day   (graduates to review)
  *   EASY  → level 2, +3 days  (graduates and skips ahead)
  *
  * Review phase rules (level >= 1):
- *   AGAIN → level 0, +10 min  (demoted back to learning)
+ *   AGAIN → level 0, +30 min  (demoted back to learning)
  *   HARD  → same level, same interval (no progress)
  *   GOOD  → level + 1 (capped at 5)
  *   EASY  → level + 2 (capped at 5)
@@ -33,7 +33,7 @@ const LEVEL_INTERVALS = {
     5: 30,
 };
 
-const TEN_MINUTES_MS = 10 * 60 * 1000;
+const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 
 /**
  * @param {Object} card - { level, easeFactor, interval, repetition, status }
@@ -52,15 +52,15 @@ export function calculateSRS(card, quality) {
             // Always reset to learning phase
             newLevel = 0;
             newInterval = 0;
-            nextReview = new Date(now.getTime() + TEN_MINUTES_MS);
+            nextReview = new Date(now.getTime() + THIRTY_MINUTES_MS);
             break;
 
         case "HARD":
             if (isLearning) {
-                // Still learning — stay at level 0, re-queue in 10 min
+                // Still learning — stay at level 0, re-queue in 30 min
                 newLevel = 0;
                 newInterval = 0;
-                nextReview = new Date(now.getTime() + TEN_MINUTES_MS);
+                nextReview = new Date(now.getTime() + THIRTY_MINUTES_MS);
             } else {
                 // Review phase — no progress, keep same level & interval
                 newLevel = level;
@@ -74,7 +74,7 @@ export function calculateSRS(card, quality) {
             newLevel = Math.min(level + 1, 5);
             newInterval = LEVEL_INTERVALS[newLevel];
             nextReview = newInterval === 0
-                ? new Date(now.getTime() + TEN_MINUTES_MS)
+                ? new Date(now.getTime() + THIRTY_MINUTES_MS)
                 : addDays(now, newInterval);
             break;
 
@@ -83,7 +83,7 @@ export function calculateSRS(card, quality) {
             newLevel = Math.min(level + 2, 5);
             newInterval = LEVEL_INTERVALS[newLevel];
             nextReview = newInterval === 0
-                ? new Date(now.getTime() + TEN_MINUTES_MS)
+                ? new Date(now.getTime() + THIRTY_MINUTES_MS)
                 : addDays(now, newInterval);
             break;
 

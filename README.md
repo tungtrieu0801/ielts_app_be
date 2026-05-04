@@ -40,7 +40,7 @@ Bảng interval theo level:
 
 | Level | Interval | Ý nghĩa |
 | :--- | :--- | :--- |
-| 0 | 10 phút | Đang học (learning phase) |
+| 0 | 30 phút | Đang học (learning phase) |
 | 1 | 1 ngày | Vừa tốt nghiệp |
 | 2 | 3 ngày | |
 | 3 | 7 ngày | |
@@ -51,8 +51,8 @@ Quy tắc chuyển level theo đánh giá:
 
 | Quality | Level 0 (Learning) | Level ≥ 1 (Review) |
 | :--- | :--- | :--- |
-| AGAIN | Level 0, +10 phút | Level 0, +10 phút (reset về học lại) |
-| HARD | Level 0, +10 phút | Giữ nguyên level, repeat interval |
+| AGAIN | Level 0, +30 phút | Level 0, +30 phút (reset về học lại) |
+| HARD | Level 0, +30 phút | Giữ nguyên level, repeat interval |
 | GOOD | Level +1 (tốt nghiệp) | Level +1 (tối đa 5) |
 | EASY | Level +2 (skip) | Level +2 (tối đa 5) |
 
