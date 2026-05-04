@@ -64,9 +64,9 @@ Mapping theo chế độ học (Study Modes):
 | :--- | :--- |
 | Gõ **sai** | `AGAIN` — Reset về Level 0 |
 | Đúng, ≤ **4 giây** | `EASY` — Tăng 2 Level |
-| Đúng, **4–8 giây** | `GOOD` — Tăng 1 Level |
-| Đúng, **8–12 giây** | `HARD` — Giữ nguyên Level |
-| Đúng, > **12 giây** | `AGAIN` — Nhớ quá lâu, tương đương không nhớ |
+| Đúng, **4–10 giây** | `GOOD` — Tăng 1 Level |
+| Đúng, **10–13 giây** | `HARD` — Giữ nguyên Level |
+| Đúng, > **13 giây** | `AGAIN` — Nhớ quá lâu, tương đương không nhớ |
 
 *Lưu ý*: Nếu người dùng sử dụng Gợi ý (Ctrl+Space), điểm tối đa chỉ là `GOOD` (không thể đạt `EASY`).
 Logic này được cài đặt tại `src/shared/utils/calcQualityByTime.js` và dùng chung cho cả 3 chế độ gõ.
