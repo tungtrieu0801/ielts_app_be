@@ -58,11 +58,18 @@ Quy tắc chuyển level theo đánh giá:
 
 Mapping theo chế độ học (Study Modes):
 - **Flashcard**: Người dùng tự chọn 1 trong 4 mức (`AGAIN`, `HARD`, `GOOD`, `EASY`).
-- **Fill-in / Nghe gõ / Đọc gõ**: Hệ thống tự động đánh giá dựa trên kết quả nhập liệu:
-  - Gõ ĐÚNG: Tương ứng mức `GOOD` (Tăng 1 Level).
-  - Gõ SAI: Tương ứng mức `AGAIN` (Reset về Level 0, học lại sau 10 phút).
-  
-*Lưu ý*: Các chế độ gõ hiện chưa hỗ trợ mức `HARD` và `EASY` để đảm bảo tính khắt khe của việc ghi nhớ chủ động (Active Recall).
+- **Fill-in / Nghe gõ / Đọc gõ**: Hệ thống tự động đánh giá dựa trên **tính đúng/sai** và **thời gian phản hồi** (tính từ lúc từ xuất hiện đến khi nhấn Kiểm tra):
+
+| Điều kiện | Quality |
+| :--- | :--- |
+| Gõ **sai** | `AGAIN` — Reset về Level 0 |
+| Đúng, ≤ **4 giây** | `EASY` — Tăng 2 Level |
+| Đúng, **4–8 giây** | `GOOD` — Tăng 1 Level |
+| Đúng, **8–12 giây** | `HARD` — Giữ nguyên Level |
+| Đúng, > **12 giây** | `AGAIN` — Nhớ quá lâu, tương đương không nhớ |
+
+*Lưu ý*: Nếu người dùng sử dụng Gợi ý (Ctrl+Space), điểm tối đa chỉ là `GOOD` (không thể đạt `EASY`).
+Logic này được cài đặt tại `src/shared/utils/calcQualityByTime.js` và dùng chung cho cả 3 chế độ gõ.
 
 **Ease Factor**: Mỗi thẻ có easeFactor từ 1.3–3.0. Công thức điều chỉnh:
 ```
