@@ -441,6 +441,7 @@ export const prepareYoutube = async (req, res) => {
         const cached = await YoutubeCache.findOne({ videoId }).lean();
         if (cached) {
             console.log(`[dictation] Cache HIT for videoId=${videoId}`);
+            const savedProgress = await DictationProgress.findOne({ user: req.user._id, videoId }).lean();
             return res.json({
                 mode: 'youtube',
                 exercises: cached.exercises,
@@ -448,6 +449,7 @@ export const prepareYoutube = async (req, res) => {
                 videoId,
                 title: cached.title,
                 fromCache: true,
+                savedProgress
             });
         }
 
@@ -502,7 +504,8 @@ export const prepareYoutube = async (req, res) => {
             { upsert: true, new: true }
         ).catch(e => console.warn('[dictation] Cache save error:', e.message));
 
-        return res.json({ mode: 'youtube', exercises, total: exercises.length, videoId, title });
+        const savedProgress = await DictationProgress.findOne({ user: req.user._id, videoId }).lean();
+        return res.json({ mode: 'youtube', exercises, total: exercises.length, videoId, title, savedProgress });
     } catch (err) {
         console.error('[dictation] prepareYoutube error:', err.message);
         return res.status(500).json({
@@ -527,5 +530,37 @@ export const getSharedLibrary = async (req, res) => {
     } catch (err) {
         console.error('[dictation] getSharedLibrary error:', err.message);
         return res.status(500).json({ error: 'Lỗi khi tải thư viện.' });
+    }
+};
+
+import DictationProgress from "../models/DictationProgress.js";
+
+// Save progress
+export const saveProgress = async (req, res) => {
+    try {
+        const { videoId, idx, done, stats, notes } = req.body;
+        if (!videoId) return res.status(400).json({ error: "Missing videoId" });
+
+        const progress = await DictationProgress.findOneAndUpdate(
+            { user: req.user._id, videoId },
+            { idx, done, stats, notes },
+            { upsert: true, new: true }
+        );
+        res.json({ success: true, progress });
+    } catch (err) {
+        console.error("[dictation] saveProgress error:", err);
+        res.status(500).json({ error: "Lỗi lưu tiến trình" });
+    }
+};
+
+// Get progress
+export const getProgress = async (req, res) => {
+    try {
+        const { videoId } = req.params;
+        const progress = await DictationProgress.findOne({ user: req.user._id, videoId });
+        res.json({ data: progress });
+    } catch (err) {
+        console.error("[dictation] getProgress error:", err);
+        res.status(500).json({ error: "Lỗi tải tiến trình" });
     }
 };
