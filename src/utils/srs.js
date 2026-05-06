@@ -33,7 +33,7 @@ const LEVEL_INTERVALS = {
     5: 30,
 };
 
-const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+const THIRTY_MINUTES_MS = 60 * 60 * 1000;
 
 /**
  * @param {Object} card - { level, easeFactor, interval, repetition, status }
