@@ -521,12 +521,47 @@ export const prepareYoutube = async (req, res) => {
  */
 export const getSharedLibrary = async (req, res) => {
     try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        const totalItems = await YoutubeCache.countDocuments({});
         const videos = await YoutubeCache.find({})
             .select('videoId url title total createdAt -_id')
             .sort({ createdAt: -1 })
-            .limit(20)
+            .skip(skip)
+            .limit(limit)
             .lean();
-        return res.json({ data: videos });
+
+        // Lấy tiến độ của user hiện tại cho các video này
+        const videoIds = videos.map(v => v.videoId);
+        const progresses = await DictationProgress.find({ 
+            user: req.user._id, 
+            videoId: { $in: videoIds } 
+        }).lean();
+
+        const progressMap = {};
+        progresses.forEach(p => {
+            progressMap[p.videoId] = p;
+        });
+
+        const data = videos.map(v => {
+            const prog = progressMap[v.videoId];
+            return {
+                ...v,
+                doneCount: prog && prog.done ? prog.done.length : 0
+            };
+        });
+
+        return res.json({ 
+            data,
+            pagination: {
+                totalItems,
+                currentPage: page,
+                totalPages: Math.ceil(totalItems / limit),
+                pageSize: limit
+            }
+        });
     } catch (err) {
         console.error('[dictation] getSharedLibrary error:', err.message);
         return res.status(500).json({ error: 'Lỗi khi tải thư viện.' });
