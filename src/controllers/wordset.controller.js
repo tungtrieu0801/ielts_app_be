@@ -40,6 +40,7 @@ export const getPublicSets = async (req, res) => {
 
         const baseQuery = {
             isPublic: true,
+            isDisabled: { $ne: true }, // Không hiện bộ từ đã bị tắt
             userId: { $ne: userId },
         };
 
