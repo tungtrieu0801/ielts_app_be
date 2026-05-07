@@ -60,11 +60,25 @@ export const getGlobalStudySession = async (req, res) => {
         const userId = await getUserMongoId(req.user.id);
         const now = new Date();
 
+        // Lấy danh sách setId bị tắt của user
+        const disabledSets = await WordSet.find({ userId, isDisabled: true }).select("_id").lean();
+        const disabledSetIds = disabledSets.map(s => s._id);
+
+        // Lấy wordId của các từ thuộc bộ bị tắt để loại bỏ
+        const disabledWordIds = disabledSetIds.length > 0
+            ? (await Word.find({ setId: { $in: disabledSetIds } }).select("_id").lean()).map(w => w._id)
+            : [];
+
+        const excludeWordFilter = disabledWordIds.length > 0
+            ? { wordId: { $nin: disabledWordIds } }
+            : {};
+
         // 1. First, fetch DUE cards (SRS reviews)
         const dueCards = await UserCard.find({
             userId,
             status: { $in: ["LEARNING", "REVIEW"] },
             nextReview: { $lte: now },
+            ...excludeWordFilter,
         })
             .sort({ nextReview: 1 })
             .limit(SESSION_LIMIT)
@@ -78,6 +92,7 @@ export const getGlobalStudySession = async (req, res) => {
             const newCards = await UserCard.find({
                 userId,
                 status: "NEW",
+                ...excludeWordFilter,
             })
                 .sort({ createdAt: -1 })
                 .limit(remainingForNew)
@@ -90,10 +105,11 @@ export const getGlobalStudySession = async (req, res) => {
         if (sessionCards.length < SESSION_LIMIT) {
             const remainingForActivation = SESSION_LIMIT - sessionCards.length;
             
-            // Find words belonging to user that DO NOT have a UserCard yet
-            // This is the most reliable way to find unactivated words
             const wordsToActivate = await Word.aggregate([
-                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+                { $match: { 
+                    userId: new mongoose.Types.ObjectId(userId),
+                    ...(disabledSetIds.length > 0 ? { setId: { $nin: disabledSetIds } } : {})
+                }},
                 {
                     $lookup: {
                         from: "usercards",
@@ -180,9 +196,12 @@ export const getStudySession = async (req, res) => {
         const userId = await getUserMongoId(req.user.id);
         const { setId } = req.params;
 
-        // Verify set ownership
+        // Verify set ownership và kiểm tra trạng thái tắt
         const set = await WordSet.findOne({ _id: setId, userId }).lean();
         if (!set) return res.status(404).json({ message: "Word set not found" });
+        if (set.isDisabled) {
+            return res.status(403).json({ message: "Bộ từ này đang bị tắt. Vui lòng bật lại để học.", code: "SET_DISABLED" });
+        }
 
         // Fetch all word IDs in this set
         const words = await Word.find({ setId, userId }).lean();
@@ -418,6 +437,19 @@ export const getStudyStats = async (req, res) => {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
+        // Lấy các setId đang hoạt động (không bị tắt)
+        const activeSets = await WordSet.find({ userId, isDisabled: { $ne: true } }).select("_id").lean();
+        const activeSetIds = activeSets.map(s => s._id);
+
+        // Từ thuộc các bộ đang hoạt động
+        const activeWordIds = activeSetIds.length > 0
+            ? (await Word.find({ setId: { $in: activeSetIds } }).select("_id").lean()).map(w => w._id)
+            : [];
+
+        const activeWordFilter = activeWordIds.length > 0
+            ? { wordId: { $in: activeWordIds } }
+            : { wordId: { $in: [] } };
+
         const [
             totalWords,
             totalSets,
@@ -431,22 +463,24 @@ export const getStudyStats = async (req, res) => {
             masteredCards,
             reviewedToday
         ] = await Promise.all([
-            Word.countDocuments({ userId }),
-            WordSet.countDocuments({ userId }),
-            UserCard.countDocuments({ userId }),
+            Word.countDocuments({ userId, setId: { $in: activeSetIds } }),
+            WordSet.countDocuments({ userId, isDisabled: { $ne: true } }),
+            UserCard.countDocuments({ userId, ...activeWordFilter }),
             UserCard.countDocuments({
                 userId,
+                ...activeWordFilter,
                 status: { $in: ["LEARNING", "REVIEW"] },
                 nextReview: { $lte: now },
             }),
-            UserCard.countDocuments({ userId, status: "NEW" }),
-            UserCard.countDocuments({ userId, level: 1 }),
-            UserCard.countDocuments({ userId, level: 2 }),
-            UserCard.countDocuments({ userId, level: 3 }),
-            UserCard.countDocuments({ userId, level: 4 }),
-            UserCard.countDocuments({ userId, level: 5 }),
+            UserCard.countDocuments({ userId, ...activeWordFilter, status: "NEW" }),
+            UserCard.countDocuments({ userId, ...activeWordFilter, level: 1 }),
+            UserCard.countDocuments({ userId, ...activeWordFilter, level: 2 }),
+            UserCard.countDocuments({ userId, ...activeWordFilter, level: 3 }),
+            UserCard.countDocuments({ userId, ...activeWordFilter, level: 4 }),
+            UserCard.countDocuments({ userId, ...activeWordFilter, level: 5 }),
             UserCard.countDocuments({
                 userId,
+                ...activeWordFilter,
                 lastReviewed: { $gte: todayStart },
             }),
         ]);
@@ -454,19 +488,13 @@ export const getStudyStats = async (req, res) => {
         // Words that haven't been "activated" (don't have a UserCard yet) are also NEW
         const unactivatedCount = Math.max(0, totalWords - totalUserCards);
         const newTotal = newCards + unactivatedCount;
-        
-        // Match the button logic: If there are new words, they are the priority
-        // If there are new words, dueCards count for the dashboard will reflect the sum
-        // But we can label it differently or keep it as is. 
-        // User wants them to "be the same", meaning if the button takes new words, 
-        // the count should reflect that.
         const totalAvailable = newTotal + dueCards;
 
         res.json({
             data: {
                 totalWords,
                 totalSets,
-                dueCards: totalAvailable, // This is what shows on the "Học ngay" card
+                dueCards: totalAvailable,
                 newTotal,
                 dueOnly: dueCards,
                 level1Count,
@@ -636,22 +664,34 @@ export const getStudySchedule = async (req, res) => {
         const userId = await getUserMongoId(req.user.id);
         const now = new Date();
 
-        // 1. Cards available right now (ONLY SRS DUE CARDS)
+        // Lấy các setId đang hoạt động (không bị tắt)
+        const activeSets = await WordSet.find({ userId, isDisabled: { $ne: true } }).select("_id").lean();
+        const activeSetIds = activeSets.map(s => s._id);
+        const activeWordIds = activeSetIds.length > 0
+            ? (await Word.find({ setId: { $in: activeSetIds } }).select("_id").lean()).map(w => w._id)
+            : [];
+        const activeWordFilter = activeWordIds.length > 0
+            ? { wordId: { $in: activeWordIds } }
+            : { wordId: { $in: [] } };
+
+        // 1. Cards available right now (ONLY SRS DUE CARDS, chỉ từ bộ hoạt động)
         const [availableNow, totalWords, totalUserCards] = await Promise.all([
             UserCard.countDocuments({
                 userId,
+                ...activeWordFilter,
                 status: { $in: ["LEARNING", "REVIEW"] },
                 nextReview: { $lte: now },
             }),
-            Word.countDocuments({ userId }),
-            UserCard.countDocuments({ userId }),
+            Word.countDocuments({ userId, setId: { $in: activeSetIds } }),
+            UserCard.countDocuments({ userId, ...activeWordFilter }),
         ]);
 
         const unactivatedCount = Math.max(0, totalWords - totalUserCards);
 
-        // 2. Upcoming cards (nextReview > now, sorted ascending)
+        // 2. Upcoming cards (nextReview > now, sorted ascending), chỉ từ bộ hoạt động
         const upcoming = await UserCard.find({
             userId,
+            ...activeWordFilter,
             status: { $in: ["LEARNING", "REVIEW"] },
             nextReview: { $gt: now },
         })
@@ -665,8 +705,7 @@ export const getStudySchedule = async (req, res) => {
             : null;
 
         // 3. Build timeline buckets
-        // Group upcoming cards into human-readable time buckets
-        const buckets = new Map(); // label → { count, nextReviewAt }
+        const buckets = new Map();
 
         for (const card of upcoming) {
             const diffMs = card.nextReview - now;
@@ -691,15 +730,14 @@ export const getStudySchedule = async (req, res) => {
             buckets.get(label).count++;
         }
 
-        // Only return first 6 buckets for cleanliness
         const timeline = [...buckets.values()].slice(0, 6);
 
-        // 4. Suggest a set that has due or new cards
+        // 4. Suggest a set that has due or new cards (chỉ bộ đang hoạt động)
         let suggestedSetId = null;
 
-        // 4a. Try DUE cards first (prioritize review)
         const firstDueCard = await UserCard.findOne({
             userId,
+            ...activeWordFilter,
             status: { $in: ["LEARNING", "REVIEW"] },
             nextReview: { $lte: now },
         }).select("wordId").lean();
@@ -709,10 +747,10 @@ export const getStudySchedule = async (req, res) => {
             if (word) suggestedSetId = word.setId;
         }
 
-        // 4b. If no due cards, try NEW cards
         if (!suggestedSetId) {
             const firstNewCard = await UserCard.findOne({
                 userId,
+                ...activeWordFilter,
                 status: "NEW",
             }).select("wordId").lean();
             if (firstNewCard) {
@@ -721,12 +759,9 @@ export const getStudySchedule = async (req, res) => {
             }
         }
 
-        // 4b. If no active cards, find first unactivated set (one with words but no usercards)
         if (!suggestedSetId && unactivatedCount > 0) {
-            const allSets = await WordSet.find({ userId }).sort({ createdAt: -1 }).lean();
-            for (const s of allSets) {
-                if (s.wordCount > 0) {
-                    // Check if this set has ANY word with a UserCard
+            for (const s of activeSets) {
+                if ((s.wordCount || 0) > 0) {
                     const firstWord = await Word.findOne({ setId: s._id }).select("_id").lean();
                     if (firstWord) {
                         const cardExists = await UserCard.exists({ userId, wordId: firstWord._id });

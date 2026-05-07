@@ -45,6 +45,12 @@ const wordSetSchema = new mongoose.Schema(
             default: null,
             index: true,
         },
+        // Tắt bộ từ: các từ trong bộ sẽ không được học/tính thống kê
+        isDisabled: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
     },
     {
         timestamps: true,

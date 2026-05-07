@@ -100,10 +100,11 @@ export const createWordSet = async (req, res) => {
 export const updateWordSet = async (req, res) => {
     try {
         const { _id: userId } = await getUserMongoId(req.user.id);
-        const { title, description, color, isPublic } = req.body;
+        const { title, description, color, isPublic, isDisabled } = req.body;
 
         const updateFields = { title, description, color };
         if (typeof isPublic === "boolean") updateFields.isPublic = isPublic;
+        if (typeof isDisabled === "boolean") updateFields.isDisabled = isDisabled;
 
         const set = await WordSet.findOneAndUpdate(
             { _id: req.params.id, userId },
@@ -113,6 +114,23 @@ export const updateWordSet = async (req, res) => {
 
         if (!set) return res.status(404).json({ message: "Word set not found" });
         res.json({ data: set });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
+// PATCH /wordsets/:id/toggle-disable — bật/tắt bộ từ
+export const toggleDisableWordSet = async (req, res) => {
+    try {
+        const { _id: userId } = await getUserMongoId(req.user.id);
+
+        const set = await WordSet.findOne({ _id: req.params.id, userId });
+        if (!set) return res.status(404).json({ message: "Word set not found" });
+
+        set.isDisabled = !set.isDisabled;
+        await set.save();
+
+        res.json({ data: set, message: set.isDisabled ? "Đã tắt bộ từ." : "Đã bật lại bộ từ." });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
