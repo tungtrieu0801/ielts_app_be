@@ -8,6 +8,7 @@ import {
     deleteWordSet,
     forkWordSet,
     toggleDisableWordSet,
+    moveToFolder,
 } from "../controllers/wordset.controller.js";
 
 const router = express.Router();
@@ -19,6 +20,7 @@ router.get("/public", getPublicSets);       // Bộ từ public của người k
 router.post("/", createWordSet);
 router.put("/:id", updateWordSet);
 router.patch("/:id/toggle-disable", toggleDisableWordSet); // Bật/tắt bộ từ
+router.patch("/:id/move-to-folder", moveToFolder);         // Chuyển vào thư mục
 router.delete("/:id", deleteWordSet);
 router.post("/:id/fork", forkWordSet);      // Fork bộ từ public về tài khoản
 

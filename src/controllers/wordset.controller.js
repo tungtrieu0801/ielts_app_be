@@ -1,6 +1,7 @@
 import WordSet from "../models/WordSet.js";
 import Word from "../models/Word.js";
 import User from "../models/User.js";
+import Folder from "../models/Folder.js";
 
 // Helper: lấy MongoDB _id của user từ JWT payload (googleId)
 const getUserMongoId = async (googleId) => {
@@ -216,6 +217,33 @@ export const forkWordSet = async (req, res) => {
         });
     } catch (err) {
         console.error("[wordset] forkWordSet error:", err);
+        res.status(500).json({ message: err.message });
+    }
+};
+
+// PATCH /wordsets/:id/move-to-folder — chuyển bộ từ vào folder (hoặc ra root)
+export const moveToFolder = async (req, res) => {
+    try {
+        const { _id: userId } = await getUserMongoId(req.user.id);
+        const setId = req.params.id;
+        const { folderId } = req.body; // null = chuyển ra root
+
+        // Tìm bộ từ — cho phép cả bộ đi fork (forkedFrom != null), miễn là thuộc userId này
+        const set = await WordSet.findOne({ _id: setId, userId });
+        if (!set) return res.status(404).json({ message: "Bộ từ không tồn tại hoặc không thuộc về bạn." });
+
+        // Nếu folderId được cung cấp, kiểm tra folder phải thuộc user
+        if (folderId) {
+            const folder = await Folder.findOne({ _id: folderId, userId });
+            if (!folder) return res.status(404).json({ message: "Thư mục không tồn tại hoặc không thuộc về bạn." });
+        }
+
+        set.folderId = folderId || null;
+        await set.save();
+
+        res.json({ data: set, message: folderId ? "Đã chuyển bộ từ vào thư mục." : "Đã chuyển bộ từ ra ngoài (root)." });
+    } catch (err) {
+        console.error("[wordset] moveToFolder error:", err);
         res.status(500).json({ message: err.message });
     }
 };
