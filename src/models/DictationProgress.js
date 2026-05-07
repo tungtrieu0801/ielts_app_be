@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const DictationProgressSchema = new mongoose.Schema(
     {
-        user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
         videoId: { type: String, required: true },
         idx: { type: Number, default: 0 },
         done: { type: Array, default: [] },

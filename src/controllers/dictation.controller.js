@@ -6,6 +6,10 @@
 // ═══════════════════════════════════════════════════════════════════
 import YoutubeCache from "../models/YoutubeCache.js";
 import translate from "google-translate-api-x";
+import User from "../models/User.js";
+import DictationProgress from "../models/DictationProgress.js";
+
+
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -427,7 +431,7 @@ async function fetchVideoTitle(videoId) {
 
 export const prepareYoutube = async (req, res) => {
     try {
-        const { url } = req.body;
+        const { url, userId } = req.body;
         if (!url) return res.status(400).json({ error: 'Vui lòng nhập YouTube URL.' });
 
         const videoId = extractVideoId(url.trim());
@@ -441,7 +445,8 @@ export const prepareYoutube = async (req, res) => {
         const cached = await YoutubeCache.findOne({ videoId }).lean();
         if (cached) {
             console.log(`[dictation] Cache HIT for videoId=${videoId}`);
-            const savedProgress = await DictationProgress.findOne({ user: req.user._id, videoId }).lean();
+            let savedProgress = null;
+            if (userId) savedProgress = await DictationProgress.findOne({ userId, videoId }).lean();
             return res.json({
                 mode: 'youtube',
                 exercises: cached.exercises,
@@ -504,7 +509,8 @@ export const prepareYoutube = async (req, res) => {
             { upsert: true, new: true }
         ).catch(e => console.warn('[dictation] Cache save error:', e.message));
 
-        const savedProgress = await DictationProgress.findOne({ user: req.user._id, videoId }).lean();
+        let savedProgress = null;
+        if (userId) savedProgress = await DictationProgress.findOne({ userId, videoId }).lean();
         return res.json({ mode: 'youtube', exercises, total: exercises.length, videoId, title, savedProgress });
     } catch (err) {
         console.error('[dictation] prepareYoutube error:', err.message);
@@ -524,6 +530,7 @@ export const getSharedLibrary = async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
+        const userId = req.query.userId;
 
         const totalItems = await YoutubeCache.countDocuments({});
         const videos = await YoutubeCache.find({})
@@ -533,12 +540,15 @@ export const getSharedLibrary = async (req, res) => {
             .limit(limit)
             .lean();
 
-        // Lấy tiến độ của user hiện tại cho các video này
         const videoIds = videos.map(v => v.videoId);
-        const progresses = await DictationProgress.find({ 
-            user: req.user._id, 
-            videoId: { $in: videoIds } 
-        }).lean();
+        
+        let progresses = [];
+        if (userId) {
+            progresses = await DictationProgress.find({ 
+                userId: userId, 
+                videoId: { $in: videoIds } 
+            }).lean();
+        }
 
         const progressMap = {};
         progresses.forEach(p => {
@@ -568,16 +578,17 @@ export const getSharedLibrary = async (req, res) => {
     }
 };
 
-import DictationProgress from "../models/DictationProgress.js";
+
 
 // Save progress
 export const saveProgress = async (req, res) => {
     try {
-        const { videoId, idx, done, stats, notes } = req.body;
+        const { videoId, idx, done, stats, notes, userId } = req.body;
         if (!videoId) return res.status(400).json({ error: "Missing videoId" });
+        if (!userId) return res.status(400).json({ error: "Missing userId" });
 
         const progress = await DictationProgress.findOneAndUpdate(
-            { user: req.user._id, videoId },
+            { userId: userId, videoId },
             { idx, done, stats, notes },
             { upsert: true, new: true }
         );
@@ -592,7 +603,9 @@ export const saveProgress = async (req, res) => {
 export const getProgress = async (req, res) => {
     try {
         const { videoId } = req.params;
-        const progress = await DictationProgress.findOne({ user: req.user._id, videoId });
+        const { userId } = req.query; // assuming passed as query since it's a GET
+        if (!userId) return res.status(400).json({ error: "Missing userId" });
+        const progress = await DictationProgress.findOne({ userId: userId, videoId });
         res.json({ data: progress });
     } catch (err) {
         console.error("[dictation] getProgress error:", err);
