@@ -99,7 +99,7 @@ export const getRanking = async (req, res) => {
 
         // Cộng thêm elapsed cho người đang có sessionStart (đang online)
         const nowMs = Date.now();
-        const result = agg.map((r, idx) => {
+        let result = agg.map((r) => {
             let seconds = r.totalSeconds;
             let isOnline = false;
             if (r.sessionStart) {
@@ -110,7 +110,6 @@ export const getRanking = async (req, res) => {
                 }
             }
             return {
-                rank: idx + 1,
                 userId: r.userId,
                 name: r.name,
                 picture: r.picture,
@@ -118,6 +117,15 @@ export const getRanking = async (req, res) => {
                 isOnline,
             };
         });
+
+        // Sắp xếp lại sau khi cộng dồn thời gian online hiện tại
+        result.sort((a, b) => b.totalSeconds - a.totalSeconds);
+
+        // Gán lại rank
+        result = result.map((item, idx) => ({
+            ...item,
+            rank: idx + 1
+        }));
 
         return res.json({ data: result, period });
     } catch (err) {
