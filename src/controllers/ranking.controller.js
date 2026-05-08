@@ -10,11 +10,22 @@ const todayUTC = () => new Date().toISOString().slice(0, 10);
  */
 export const markOnline = async (userId) => {
     const date = todayUTC();
-    await OnlineLog.findOneAndUpdate(
-        { user: userId, date },
-        { $set: { sessionStart: new Date() } },
-        { upsert: true, new: true }
-    );
+    const log = await OnlineLog.findOne({ user: userId, date });
+
+    if (log) {
+        // Nếu đang có session cũ (refresh trang / reconnect socket),
+        // cộng elapsed cũ vào totalSeconds trước khi đặt sessionStart mới
+        if (log.sessionStart) {
+            const elapsed = Math.floor((Date.now() - new Date(log.sessionStart).getTime()) / 1000);
+            if (elapsed > 0 && elapsed < 86400) {
+                log.totalSeconds += elapsed;
+            }
+        }
+        log.sessionStart = new Date();
+        await log.save();
+    } else {
+        await OnlineLog.create({ user: userId, date, sessionStart: new Date(), totalSeconds: 0 });
+    }
 };
 
 /**
