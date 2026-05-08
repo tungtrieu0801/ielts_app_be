@@ -1,11 +1,24 @@
 import ChatMessage from "../models/ChatMessage.js";
 import Word from "../models/Word.js";
+import { markOnline, markOffline } from "../controllers/ranking.controller.js";
 
+// userId map: socketId → userId
+const socketUserMap = new Map();
 const rooms = new Map(); // Store room info: { id, name, players: [], status: 'waiting'|'playing', words: [], currentTurn: 0 }
 
 export const setupSocket = (io) => {
     io.on("connection", async (socket) => {
         console.log("⚡ User connected:", socket.id);
+
+        // Track online time: client sends userId after connecting
+        socket.on("user_online", async (userId) => {
+            if (userId) {
+                socketUserMap.set(socket.id, userId);
+                await markOnline(userId);
+                // Broadcast online status update
+                io.emit("online_status_changed", { userId, isOnline: true });
+            }
+        });
 
         // --- CHAT LOGIC ---
         try {
@@ -179,8 +192,18 @@ export const setupSocket = (io) => {
             }
         });
 
-        socket.on("disconnect", () => {
+        socket.on("disconnect", async () => {
             console.log("🔥 User disconnected:", socket.id);
+
+            // Track offline time
+            const userId = socketUserMap.get(socket.id);
+            if (userId) {
+                socketUserMap.delete(socket.id);
+                await markOffline(userId);
+                // Broadcast offline status
+                io.emit("online_status_changed", { userId, isOnline: false });
+            }
+
             // Handle leaving room on disconnect
             rooms.forEach((room, roomId) => {
                 const playerIdx = room.players.findIndex(p => p.socketId === socket.id);
