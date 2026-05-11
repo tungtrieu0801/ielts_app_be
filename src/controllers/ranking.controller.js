@@ -24,6 +24,17 @@ export const markOnline = async (userId) => {
         log.sessionStart = new Date();
         await log.save();
     } else {
+        // Check for any dangling session from previous days
+        const danglingLog = await OnlineLog.findOne({ user: userId, sessionStart: { $ne: null } });
+        if (danglingLog) {
+            const elapsed = Math.floor((Date.now() - new Date(danglingLog.sessionStart).getTime()) / 1000);
+            if (elapsed > 0 && elapsed < 86400) {
+                danglingLog.totalSeconds += elapsed;
+            }
+            danglingLog.sessionStart = null;
+            await danglingLog.save();
+        }
+
         await OnlineLog.create({ user: userId, date, sessionStart: new Date(), totalSeconds: 0 });
     }
 };
@@ -33,13 +44,15 @@ export const markOnline = async (userId) => {
  * Cộng dồn thời gian vào totalSeconds, xoá sessionStart.
  */
 export const markOffline = async (userId) => {
-    const date = todayUTC();
-    const log = await OnlineLog.findOne({ user: userId, date });
+    // Tìm log gần nhất có sessionStart đang mở (kể cả qua ngày)
+    const log = await OnlineLog.findOne({ user: userId, sessionStart: { $ne: null } }).sort({ date: -1 });
     if (!log) return;
 
     if (log.sessionStart) {
         const elapsed = Math.floor((Date.now() - new Date(log.sessionStart).getTime()) / 1000);
-        log.totalSeconds += Math.max(0, elapsed);
+        if (elapsed > 0 && Math.max(0, elapsed) < 86400) {
+            log.totalSeconds += Math.max(0, elapsed);
+        }
         log.sessionStart = null;
         await log.save();
     }
@@ -76,11 +89,9 @@ export const getRanking = async (req, res) => {
                 $group: {
                     _id: "$user",
                     totalSeconds: { $sum: "$totalSeconds" },
-                    // Nếu có sessionStart hôm nay thì user đang online → cộng thêm elapsed
+                    // Nếu có bất kỳ sessionStart nào đang mở, lấy cái mới nhất
                     sessionStart: {
-                        $max: {
-                            $cond: [{ $eq: ["$date", todayUTC()] }, "$sessionStart", null]
-                        }
+                        $max: "$sessionStart"
                     }
                 }
             },
