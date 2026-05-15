@@ -2,6 +2,7 @@ import WordSet from "../models/WordSet.js";
 import Word from "../models/Word.js";
 import User from "../models/User.js";
 import Folder from "../models/Folder.js";
+import UserCard from "../models/UserCard.js";
 
 // Helper: lấy MongoDB _id của user từ JWT payload (googleId)
 const getUserMongoId = async (googleId) => {
@@ -145,6 +146,13 @@ export const deleteWordSet = async (req, res) => {
 
         const set = await WordSet.findOneAndDelete({ _id: req.params.id, userId });
         if (!set) return res.status(404).json({ message: "Word set not found" });
+
+        // Find all words to delete their associated UserCards
+        const words = await Word.find({ setId: req.params.id }).select("_id").lean();
+        if (words.length > 0) {
+            const wordIds = words.map(w => w._id);
+            await UserCard.deleteMany({ wordId: { $in: wordIds } });
+        }
 
         // Cascade delete all words in this set
         await Word.deleteMany({ setId: req.params.id });

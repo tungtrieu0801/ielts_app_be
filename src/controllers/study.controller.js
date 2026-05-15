@@ -166,6 +166,7 @@ export const getGlobalStudySession = async (req, res) => {
 
         const result = sessionCards.map((card) => {
             const word = wordMap[card.wordId.toString()];
+            if (!word) return null; // Filter out orphaned cards
             return {
                 ...word,
                 cardId: card._id,
@@ -176,7 +177,15 @@ export const getGlobalStudySession = async (req, res) => {
                     nextReview: card.nextReview,
                 },
             };
-        });
+        }).filter(Boolean);
+
+        // Async cleanup of orphaned cards
+        const orphanedCardIds = sessionCards
+            .filter(c => !wordMap[c.wordId.toString()])
+            .map(c => c._id);
+        if (orphanedCardIds.length > 0) {
+            UserCard.deleteMany({ _id: { $in: orphanedCardIds } }).catch(e => console.error("[study] Error cleaning up orphaned cards:", e));
+        }
 
         const hasDue = sessionCards.some(c => c.status === "LEARNING" || c.status === "REVIEW");
 

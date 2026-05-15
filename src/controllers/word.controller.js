@@ -1,6 +1,7 @@
 import Word from "../models/Word.js";
 import WordSet from "../models/WordSet.js";
 import User from "../models/User.js";
+import UserCard from "../models/UserCard.js";
 
 const getUserMongoId = async (googleId) => {
     const user = await User.findOne({ googleId }).select("_id").lean();
@@ -146,6 +147,9 @@ export const deleteWord = async (req, res) => {
         if (!word) return res.status(404).json({ message: "Word not found" });
 
         await WordSet.findByIdAndUpdate(setId, { $inc: { wordCount: -1 } });
+
+        // Xoá tiến trình học của từ này
+        await UserCard.deleteMany({ wordId: id });
 
         res.json({ message: "Deleted successfully" });
     } catch (err) {
