@@ -7,7 +7,7 @@
 import YoutubeCache from "../models/YoutubeCache.js";
 import translate from "google-translate-api-x";
 import User from "../models/User.js";
-import DictationProgress from "../models/DictationProgress.js";
+import DictationProgress, { RecentVideos } from "../models/DictationProgress.js";
 
 
 
@@ -592,6 +592,19 @@ export const saveProgress = async (req, res) => {
             { idx, done, stats, notes },
             { upsert: true, new: true }
         );
+
+        // Update recent videos list (max 5, most recent first)
+        const recent = await RecentVideos.findOne({ userId });
+        if (recent) {
+            // Remove this videoId if already in list, then prepend it
+            const filtered = recent.videoIds.filter(id => id !== videoId);
+            filtered.unshift(videoId);
+            recent.videoIds = filtered.slice(0, 5);
+            await recent.save();
+        } else {
+            await RecentVideos.create({ userId, videoIds: [videoId] });
+        }
+
         res.json({ success: true, progress });
     } catch (err) {
         console.error("[dictation] saveProgress error:", err);
@@ -603,12 +616,61 @@ export const saveProgress = async (req, res) => {
 export const getProgress = async (req, res) => {
     try {
         const { videoId } = req.params;
-        const { userId } = req.query; // assuming passed as query since it's a GET
+        const { userId } = req.query;
         if (!userId) return res.status(400).json({ error: "Missing userId" });
         const progress = await DictationProgress.findOne({ userId: userId, videoId });
         res.json({ data: progress });
     } catch (err) {
         console.error("[dictation] getProgress error:", err);
         res.status(500).json({ error: "Lỗi tải tiến trình" });
+    }
+};
+
+// Get recent videos (max 5) for a user
+export const getRecentVideos = async (req, res) => {
+    try {
+        const { userId } = req.query;
+        if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+        const recent = await RecentVideos.findOne({ userId }).lean();
+        if (!recent || !recent.videoIds.length) return res.json({ data: [] });
+
+        // Fetch cache data for each video in order
+        const caches = await YoutubeCache.find(
+            { videoId: { $in: recent.videoIds } },
+            'videoId url title total -_id'
+        ).lean();
+        const cacheMap = {};
+        caches.forEach(c => { cacheMap[c.videoId] = c; });
+
+        // Fetch progress for each video
+        const progresses = await DictationProgress.find(
+            { userId, videoId: { $in: recent.videoIds } },
+            'videoId idx done stats -_id'
+        ).lean();
+        const progMap = {};
+        progresses.forEach(p => { progMap[p.videoId] = p; });
+
+        // Return in order of recency (preserve original order from videoIds)
+        const data = recent.videoIds
+            .filter(id => cacheMap[id]) // only include videos we have cache for
+            .map(id => {
+                const cache = cacheMap[id];
+                const prog = progMap[id];
+                return {
+                    videoId: id,
+                    url: cache.url,
+                    title: cache.title,
+                    total: cache.total,
+                    doneCount: prog?.done?.length || 0,
+                    idx: prog?.idx || 0,
+                    isCompleted: prog?.done?.length >= cache.total
+                };
+            });
+
+        res.json({ data });
+    } catch (err) {
+        console.error("[dictation] getRecentVideos error:", err);
+        res.status(500).json({ error: "Lỗi tải video gần đây" });
     }
 };

@@ -57,7 +57,8 @@ const ensureUserCards = async (userId, wordIds) => {
 // ─── GET /study/global-session ───────────────────────────────────────────────
 export const getGlobalStudySession = async (req, res) => {
     try {
-        const userId = await getUserMongoId(req.user.id);
+        // const userId = await getUserMongoId(req.user.id);
+        const userId = "69e6ff095cfa9ca0641092ae";
         const now = new Date();
 
         // Lấy danh sách setId bị tắt của user
@@ -104,26 +105,28 @@ export const getGlobalStudySession = async (req, res) => {
         // 3. If still have room, check for unactivated words (not yet in UserCard)
         if (sessionCards.length < SESSION_LIMIT) {
             const remainingForActivation = SESSION_LIMIT - sessionCards.length;
-            
+
             const wordsToActivate = await Word.aggregate([
-                { $match: { 
-                    userId: new mongoose.Types.ObjectId(userId),
-                    ...(disabledSetIds.length > 0 ? { setId: { $nin: disabledSetIds } } : {})
-                }},
+                {
+                    $match: {
+                        userId: new mongoose.Types.ObjectId(userId),
+                        ...(disabledSetIds.length > 0 ? { setId: { $nin: disabledSetIds } } : {})
+                    }
+                },
                 {
                     $lookup: {
                         from: "usercards",
                         let: { wId: "$_id", uId: "$userId" },
                         pipeline: [
-                            { 
-                                $match: { 
-                                    $expr: { 
-                                        $and: [ 
-                                            { $eq: ["$wordId", "$$wId"] }, 
-                                            { $eq: ["$userId", "$$uId"] } 
-                                        ] 
-                                    } 
-                                } 
+                            {
+                                $match: {
+                                    $expr: {
+                                        $and: [
+                                            { $eq: ["$wordId", "$$wId"] },
+                                            { $eq: ["$userId", "$$uId"] }
+                                        ]
+                                    }
+                                }
                             }
                         ],
                         as: "card"
@@ -143,8 +146,8 @@ export const getGlobalStudySession = async (req, res) => {
                     wordId: { $in: wordIdsToActivate },
                     status: "NEW"
                 })
-                .sort({ createdAt: -1 })
-                .lean();
+                    .sort({ createdAt: -1 })
+                    .lean();
 
                 for (const card of activatedNewCards) {
                     sessionCards.push(card);
@@ -241,7 +244,7 @@ export const getStudySession = async (req, res) => {
                 .sort({ createdAt: 1 }) // Use 1 for sets to learn in order added
                 .limit(remaining)
                 .lean();
-            
+
             sessionCards = [...sessionCards, ...newCards];
         }
 
@@ -803,13 +806,13 @@ export const getRanking = async (req, res) => {
         // Get current user's rank
         const userId = await getUserMongoId(req.user.id);
         let currentUserRaw = await User.findById(userId).select("name picture currentStreak").lean();
-        
+
         let currentUserRank = null;
         let currentUser = null;
 
         if (currentUserRaw) {
             currentUser = { ...currentUserRaw, currentStreak: currentUserRaw.currentStreak || 0 };
-            
+
             // Check if user is in top 10
             const index = topUsers.findIndex(u => u._id.toString() === userId.toString());
             if (index !== -1) {
@@ -821,7 +824,7 @@ export const getRanking = async (req, res) => {
             }
         }
 
-        res.json({ 
+        res.json({
             data: {
                 topUsers,
                 currentUser: currentUser ? {
