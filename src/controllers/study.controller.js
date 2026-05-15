@@ -57,8 +57,8 @@ const ensureUserCards = async (userId, wordIds) => {
 // ─── GET /study/global-session ───────────────────────────────────────────────
 export const getGlobalStudySession = async (req, res) => {
     try {
-        // const userId = await getUserMongoId(req.user.id);
-        const userId = "69e6ff095cfa9ca0641092ae";
+        const userId = await getUserMongoId(req.user.id);
+        // const userId = "69e6ff095cfa9ca0641092ae";
         const now = new Date();
 
         // Lấy danh sách setId bị tắt của user
