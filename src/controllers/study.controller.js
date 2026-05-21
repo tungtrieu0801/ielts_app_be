@@ -60,6 +60,7 @@ export const getGlobalStudySession = async (req, res) => {
         const userId = await getUserMongoId(req.user.id);
         // const userId = "69e6ff095cfa9ca0641092ae";
         const now = new Date();
+        const limit = req.query.limit ? parseInt(req.query.limit, 10) : SESSION_LIMIT;
 
         // Lấy danh sách setId bị tắt của user
         const disabledSets = await WordSet.find({ userId, isDisabled: true }).select("_id").lean();
@@ -82,14 +83,14 @@ export const getGlobalStudySession = async (req, res) => {
             ...excludeWordFilter,
         })
             .sort({ nextReview: 1 })
-            .limit(SESSION_LIMIT)
+            .limit(limit)
             .lean();
 
         let sessionCards = [...dueCards];
 
         // 2. If still have room, fetch NEW cards (activated but not yet learned)
-        if (sessionCards.length < SESSION_LIMIT) {
-            const remainingForNew = SESSION_LIMIT - sessionCards.length;
+        if (sessionCards.length < limit) {
+            const remainingForNew = limit - sessionCards.length;
             const newCards = await UserCard.find({
                 userId,
                 status: "NEW",
@@ -103,8 +104,8 @@ export const getGlobalStudySession = async (req, res) => {
         }
 
         // 3. If still have room, check for unactivated words (not yet in UserCard)
-        if (sessionCards.length < SESSION_LIMIT) {
-            const remainingForActivation = SESSION_LIMIT - sessionCards.length;
+        if (sessionCards.length < limit) {
+            const remainingForActivation = limit - sessionCards.length;
 
             const wordsToActivate = await Word.aggregate([
                 {
@@ -256,7 +257,8 @@ export const getStudySession = async (req, res) => {
         });
 
         // Limit to standard batch size (e.g. 20 words)
-        const limitedCards = sessionCards.slice(0, SESSION_LIMIT);
+        const limit = req.query.limit ? parseInt(req.query.limit, 10) : SESSION_LIMIT;
+        const limitedCards = sessionCards.slice(0, limit);
 
         // Join word vocabulary data
         const result = limitedCards.map((card) => {
