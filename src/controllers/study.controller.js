@@ -207,6 +207,7 @@ export const getStudySession = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
         const { setId } = req.params;
+        const excludeIdsStr = req.query.excludeIds || "";
 
         // Verify set ownership và kiểm tra trạng thái tắt
         const set = await WordSet.findOne({ _id: setId, userId }).lean();
@@ -227,56 +228,40 @@ export const getStudySession = async (req, res) => {
         // Ensure UserCard rows exist for all words
         await ensureUserCards(userId, wordIds);
 
-        const now = new Date();
+        // Parse and build exclusion list
+        const excludeIdsList = excludeIdsStr
+            ? excludeIdsStr.split(",").filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id))
+            : [];
 
-        // 1. First, fetch DUE cards (SRS reviews)
-        const dueCards = await UserCard.find({
+        // Fetch all cards belonging to this wordset and not yet completed in the current run
+        const sessionCards = await UserCard.find({
             userId,
             wordId: { $in: wordIds },
-            status: { $in: ["LEARNING", "REVIEW"] },
-            nextReview: { $lte: now },
-        })
-            .sort({ nextReview: 1 })
-            .limit(SESSION_LIMIT)
-            .lean();
-
-        let sessionCards = [...dueCards];
-
-        // 2. Fill remaining slots with NEW cards (not yet learned)
-        const remaining = SESSION_LIMIT - sessionCards.length;
-        if (remaining > 0) {
-            const newCards = await UserCard.find({
-                userId,
-                wordId: { $in: wordIds },
-                status: "NEW",
-            })
-                .sort({ createdAt: 1 }) // Use 1 for sets to learn in order added
-                .limit(remaining)
-                .lean();
-
-            sessionCards = [...sessionCards, ...newCards];
-        }
+            _id: { $nin: excludeIdsList },
+        }).lean();
 
         if (sessionCards.length === 0) {
-            // All cards are scheduled for future — show earliest upcoming
-            const nextCard = await UserCard.findOne({
-                userId,
-                wordId: { $in: wordIds },
-            })
-                .sort({ nextReview: 1 })
-                .lean();
-
             return res.json({
                 data: [],
                 mode: "all_done",
-                nextReviewAt: nextCard?.nextReview ?? null,
+                nextReviewAt: null,
                 total: 0,
             });
         }
 
+        // Sort sessionCards to preserve word set sequential order
+        const wordIdToIndex = new Map(wordIds.map((id, index) => [id.toString(), index]));
+        sessionCards.sort((a, b) => {
+            return wordIdToIndex.get(a.wordId.toString()) - wordIdToIndex.get(b.wordId.toString());
+        });
+
+        // Limit to standard batch size (e.g. 20 words)
+        const limitedCards = sessionCards.slice(0, SESSION_LIMIT);
+
         // Join word vocabulary data
-        const result = sessionCards.map((card) => {
+        const result = limitedCards.map((card) => {
             const word = wordMap[card.wordId.toString()];
+            if (!word) return null;
             return {
                 ...word,
                 _id: word._id, // keep the word _id for display
@@ -288,13 +273,11 @@ export const getStudySession = async (req, res) => {
                     nextReview: card.nextReview,
                 },
             };
-        });
-
-        const hasDue = sessionCards.some(c => c.status === "LEARNING" || c.status === "REVIEW");
+        }).filter(Boolean);
 
         res.json({
             data: result,
-            mode: hasDue ? "srs_review" : "new_words",
+            mode: "new_words",
             total: result.length,
         });
     } catch (err) {
@@ -313,7 +296,7 @@ export const getStudySession = async (req, res) => {
 export const batchSubmit = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
-        const { answers } = req.body;
+        const { answers, isSetStudy } = req.body;
 
         if (!Array.isArray(answers) || answers.length === 0) {
             return res.status(400).json({ message: "answers array is required" });
@@ -347,6 +330,10 @@ export const batchSubmit = async (req, res) => {
 
         // Calculate new SRS state for each card
         const bulkOps = answers.map(({ cardId, quality }) => {
+            // For wordset studies, do NOT write SRS updates unless quality is AGAIN
+            if (isSetStudy && quality !== "AGAIN") {
+                return null;
+            }
             const card = cardMap[cardId];
             const newState = calculateSRS(card, quality);
             return {
@@ -355,9 +342,11 @@ export const batchSubmit = async (req, res) => {
                     update: { $set: newState },
                 },
             };
-        });
+        }).filter(Boolean);
 
-        await UserCard.bulkWrite(bulkOps);
+        if (bulkOps.length > 0) {
+            await UserCard.bulkWrite(bulkOps);
+        }
 
         // Build result summary per quality
         const summary = { AGAIN: 0, HARD: 0, GOOD: 0, EASY: 0 };
