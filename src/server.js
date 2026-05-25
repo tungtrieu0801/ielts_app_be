@@ -14,6 +14,7 @@ import studyRoutes from "./routes/study.routes.js";
 import dictationRoutes from "./routes/dictation.routes.js";
 import folderRoutes from "./routes/folder.routes.js";
 import rankingRoutes from "./routes/ranking.routes.js";
+import speakingRoutes from "./routes/speaking.routes.js";
 import connectDB from "./config/db.js";
 import ChatMessage from "./models/ChatMessage.js";
 
@@ -47,6 +48,7 @@ app.use("/study", studyRoutes);
 app.use("/dictation", dictationRoutes);
 app.use("/folders", folderRoutes);
 app.use("/ranking", rankingRoutes);
+app.use("/speaking", speakingRoutes);
 
 // Health & Status check
 app.get("/", (req, res) => res.json({
