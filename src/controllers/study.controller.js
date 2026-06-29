@@ -250,15 +250,37 @@ export const getStudySession = async (req, res) => {
             });
         }
 
-        // Sort sessionCards to preserve word set sequential order
+        // Separate sessionCards into new cards (not yet studied/level 0) and reviewed cards
+        const newCards = [];
+        const reviewCards = [];
+
+        sessionCards.forEach(card => {
+            if (card.status === "NEW" || card.level === 0 || !card.nextReview) {
+                newCards.push(card);
+            } else {
+                reviewCards.push(card);
+            }
+        });
+
+        // Sort new cards to preserve wordset sequential order
         const wordIdToIndex = new Map(wordIds.map((id, index) => [id.toString(), index]));
-        sessionCards.sort((a, b) => {
+        newCards.sort((a, b) => {
             return wordIdToIndex.get(a.wordId.toString()) - wordIdToIndex.get(b.wordId.toString());
         });
 
+        // Sort review cards by nextReview ascending (oldest/overdue first)
+        reviewCards.sort((a, b) => {
+            const dateA = a.nextReview ? new Date(a.nextReview).getTime() : 0;
+            const dateB = b.nextReview ? new Date(b.nextReview).getTime() : 0;
+            return dateA - dateB;
+        });
+
+        // Combine: new cards first (priority), then review cards
+        const sortedSessionCards = [...newCards, ...reviewCards];
+
         // Limit to standard batch size (e.g. 20 words)
         const limit = req.query.limit ? parseInt(req.query.limit, 10) : SESSION_LIMIT;
-        const limitedCards = sessionCards.slice(0, limit);
+        const limitedCards = sortedSessionCards.slice(0, limit);
 
         // Join word vocabulary data
         const result = limitedCards.map((card) => {
