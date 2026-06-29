@@ -298,7 +298,7 @@ export const getStudySession = async (req, res) => {
 export const batchSubmit = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
-        const { answers, isSetStudy } = req.body;
+        const { answers } = req.body;
 
         if (!Array.isArray(answers) || answers.length === 0) {
             return res.status(400).json({ message: "answers array is required" });
@@ -332,10 +332,6 @@ export const batchSubmit = async (req, res) => {
 
         // Calculate new SRS state for each card
         const bulkOps = answers.map(({ cardId, quality }) => {
-            // For wordset studies, do NOT write SRS updates unless quality is AGAIN
-            if (isSetStudy && quality !== "AGAIN") {
-                return null;
-            }
             const card = cardMap[cardId];
             const newState = calculateSRS(card, quality);
             return {
@@ -835,6 +831,113 @@ export const getRanking = async (req, res) => {
         });
     } catch (err) {
         console.error("[study] getRanking error:", err);
+        res.status(500).json({ message: err.message });
+    }
+};
+
+// ─── GET /study/cards ────────────────────────────────────────────────────────
+export const getCardsByLevel = async (req, res) => {
+    try {
+        const userId = await getUserMongoId(req.user.id);
+        const { level, page = 1, limit = 10, search = "" } = req.query;
+
+        const levelNum = parseInt(level, 10);
+        if (isNaN(levelNum) || levelNum < 1 || levelNum > 5) {
+            return res.status(400).json({ message: "Invalid level parameter" });
+        }
+
+        const pageNum = parseInt(page, 10) || 1;
+        const limitNum = parseInt(limit, 10) || 10;
+        const skipNum = (pageNum - 1) * limitNum;
+
+        // 1. Get active sets of the user
+        const activeSets = await WordSet.find({ userId, isDisabled: { $ne: true } }).select("_id").lean();
+        const activeSetIds = activeSets.map(s => s._id);
+
+        if (activeSetIds.length === 0) {
+            return res.json({ data: [], total: 0, page: pageNum, limit: limitNum });
+        }
+
+        // 2. Aggregation pipeline
+        const matchStage = {
+            userId: userId,
+            level: levelNum,
+        };
+
+        const pipeline = [
+            { $match: matchStage },
+            // Join with words
+            {
+                $lookup: {
+                    from: "words",
+                    localField: "wordId",
+                    foreignField: "_id",
+                    as: "wordInfo",
+                }
+            },
+            { $unwind: "$wordInfo" },
+            // Only keep words belonging to active wordsets
+            {
+                $match: {
+                    "wordInfo.setId": { $in: activeSetIds }
+                }
+            }
+        ];
+
+        // Apply search filter on the word info
+        if (search && search.trim()) {
+            const cleanSearch = search.trim();
+            pipeline.push({
+                $match: {
+                    $or: [
+                        { "wordInfo.english": { $regex: cleanSearch, $options: "i" } },
+                        { "wordInfo.vietnamese": { $regex: cleanSearch, $options: "i" } }
+                    ]
+                }
+            });
+        }
+
+        // Count total matched records for pagination
+        const countPipeline = [...pipeline, { $count: "total" }];
+        const countResult = await UserCard.aggregate(countPipeline);
+        const total = countResult[0]?.total || 0;
+
+        // Apply pagination and projection
+        pipeline.push(
+            { $sort: { lastReviewed: -1, _id: -1 } },
+            { $skip: skipNum },
+            { $limit: limitNum },
+            {
+                $project: {
+                    _id: "$wordInfo._id",
+                    cardId: "$_id",
+                    english: "$wordInfo.english",
+                    vietnamese: "$wordInfo.vietnamese",
+                    pronunciation: "$wordInfo.pronunciation",
+                    partOfSpeech: "$wordInfo.partOfSpeech",
+                    example: "$wordInfo.example",
+                    exampleTranslation: "$wordInfo.exampleTranslation",
+                    srs: {
+                        status: "$status",
+                        level: "$level",
+                        interval: "$interval",
+                        nextReview: "$nextReview"
+                    }
+                }
+            }
+        );
+
+        const data = await UserCard.aggregate(pipeline);
+
+        res.json({
+            data,
+            total,
+            page: pageNum,
+            limit: limitNum
+        });
+
+    } catch (err) {
+        console.error("[study] getCardsByLevel error:", err);
         res.status(500).json({ message: err.message });
     }
 };

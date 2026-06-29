@@ -10,6 +10,7 @@ import {
     getStreakInfo,
     getStudySchedule,
     getRanking,
+    getCardsByLevel,
 } from "../controllers/study.controller.js";
 
 const router = express.Router();
@@ -22,6 +23,7 @@ router.get("/streak", getStreakInfo);
 router.get("/schedule", getStudySchedule);
 router.get("/ranking", getRanking);
 router.get("/global-session", getGlobalStudySession);
+router.get("/cards", getCardsByLevel);
 router.get("/:setId/stats", getSetStats);
 router.get("/:setId/session", getStudySession);
 router.post("/batch-submit", batchSubmit);
