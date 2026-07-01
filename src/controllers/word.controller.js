@@ -156,3 +156,33 @@ export const deleteWord = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+// GET /words (global words across all sets of user)
+export const getAllUserWords = async (req, res) => {
+    try {
+        const userId = await getUserMongoId(req.user.id);
+        const { page = 1, limit = 20, search = "" } = req.query;
+
+        const pageNum = parseInt(page, 10) || 1;
+        const limitNum = parseInt(limit, 10) || 20;
+        const skip = (pageNum - 1) * limitNum;
+
+        const query = { userId };
+        if (search && search.trim()) {
+            const cleanSearch = search.trim();
+            query.$or = [
+                { english: { $regex: cleanSearch, $options: "i" } },
+                { vietnamese: { $regex: cleanSearch, $options: "i" } }
+            ];
+        }
+
+        const [words, total] = await Promise.all([
+            Word.find(query).sort({ createdAt: -1 }).skip(skip).limit(limitNum).populate("setId", "title color").lean(),
+            Word.countDocuments(query),
+        ]);
+
+        res.json({ data: words, total, page: pageNum, limit: limitNum });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
