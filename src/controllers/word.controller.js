@@ -167,7 +167,11 @@ export const getAllUserWords = async (req, res) => {
         const limitNum = parseInt(limit, 10) || 20;
         const skip = (pageNum - 1) * limitNum;
 
-        const query = { userId };
+        // 1. Chỉ lấy từ vựng thuộc các bộ từ KHÔNG bị tắt (isDisabled !== true)
+        const activeSets = await WordSet.find({ userId, isDisabled: { $ne: true } }, "_id").lean();
+        const activeSetIds = activeSets.map(s => s._id);
+
+        const query = { userId, setId: { $in: activeSetIds } };
         if (search && search.trim()) {
             const cleanSearch = search.trim();
             query.$or = [
