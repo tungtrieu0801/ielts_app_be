@@ -51,6 +51,11 @@ const userSchema = new mongoose.Schema(
             type: Number,
             default: 0,
         },
+        survivalHighScore: {
+            type: Number,
+            default: 0,
+            index: true,
+        },
     },
     {
         // Tự động tạo trường createdAt (ngày tham gia) và updatedAt (ngày cập nhật)

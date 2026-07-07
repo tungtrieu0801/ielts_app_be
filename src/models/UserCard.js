@@ -29,6 +29,10 @@ const userCardSchema = new mongoose.Schema(
 
         lastReviewed: { type: Date, default: null },
         nextReview: { type: Date, default: null }, // null = NEW, never scheduled yet
+
+        // Survival Game stats
+        gameCorrectCount: { type: Number, default: 0 },
+        gameWrongCount: { type: Number, default: 0 },
     },
     { timestamps: true }
 );
