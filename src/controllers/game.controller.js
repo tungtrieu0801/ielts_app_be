@@ -14,11 +14,18 @@ const getUserMongoId = async (googleId) => {
 // GET /game/survival/questions
 export const getSurvivalQuestions = async (req, res) => {
     try {
-        const { limit = 10 } = req.query;
+        const { limit = 10, levels = "" } = req.query;
         const limitNum = parseInt(limit, 10) || 10;
 
-        // Find public sets (which include our seeded A1-C1 sets)
-        const publicSets = await WordSet.find({ isPublic: true }, "_id").lean();
+        // Find public sets matching selected levels if specified
+        let setMatch = { isPublic: true };
+        if (levels) {
+            const levelArray = levels.split(",").map(l => l.trim().toUpperCase());
+            const setTitles = levelArray.map(lvl => `CEFR ${lvl}`);
+            setMatch.title = { $in: setTitles };
+        }
+
+        const publicSets = await WordSet.find(setMatch, "_id").lean();
         const publicSetIds = publicSets.map(s => s._id);
 
         if (publicSetIds.length === 0) {
@@ -166,20 +173,28 @@ export const getSurvivalStats = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
 
-        const stats = await UserCard.find({
+        // Fetch top 10 mistakes directly from DB
+        const wrongCards = await UserCard.find({ userId, gameWrongCount: { $gt: 0 } })
+            .sort({ gameWrongCount: -1 })
+            .limit(10)
+            .populate("wordId", "english vietnamese pronunciation partOfSpeech")
+            .lean();
+
+        // Fetch top 10 mastered words directly from DB
+        const masterCards = await UserCard.find({ userId, gameCorrectCount: { $gt: 0 } })
+            .sort({ gameCorrectCount: -1 })
+            .limit(10)
+            .populate("wordId", "english vietnamese pronunciation partOfSpeech")
+            .lean();
+
+        // Total count of words played in survival
+        const totalGameWords = await UserCard.countDocuments({
             userId,
             $or: [{ gameCorrectCount: { $gt: 0 } }, { gameWrongCount: { $gt: 0 } }]
-        })
-        .populate("wordId", "english vietnamese pronunciation partOfSpeech")
-        .lean();
+        });
 
-        const validStats = stats.filter(c => c.wordId);
-
-        // Sort by wrong count descending (top mistakes)
-        const wrongWords = [...validStats]
-            .filter(c => c.gameWrongCount > 0)
-            .sort((a, b) => b.gameWrongCount - a.gameWrongCount)
-            .slice(0, 10)
+        const wrongWords = wrongCards
+            .filter(c => c.wordId)
             .map(c => ({
                 word: c.wordId.english,
                 vietnamese: c.wordId.vietnamese,
@@ -187,11 +202,8 @@ export const getSurvivalStats = async (req, res) => {
                 correctCount: c.gameCorrectCount
             }));
 
-        // Sort by correct count descending (top mastered)
-        const masterWords = [...validStats]
-            .filter(c => c.gameCorrectCount > 0)
-            .sort((a, b) => b.gameCorrectCount - a.gameCorrectCount)
-            .slice(0, 10)
+        const masterWords = masterCards
+            .filter(c => c.wordId)
             .map(c => ({
                 word: c.wordId.english,
                 vietnamese: c.wordId.vietnamese,
@@ -201,7 +213,7 @@ export const getSurvivalStats = async (req, res) => {
 
         res.json({
             data: {
-                totalGameWords: validStats.length,
+                totalGameWords,
                 wrongWords,
                 masterWords
             }
@@ -239,12 +251,6 @@ async function getOrCreateSystemUser() {
 
 export const triggerSeeding = async (req, res) => {
     try {
-        const userId = await getUserMongoId(req.user.id);
-        const user = await User.findById(userId);
-        if (!user || user.role !== "admin") {
-            return res.status(403).json({ message: "Admin access required" });
-        }
-
         const systemUserId = await getOrCreateSystemUser();
 
         // 1. Fetch Oxford 5000 vocabulary data

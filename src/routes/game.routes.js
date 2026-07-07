@@ -10,14 +10,15 @@ import {
 
 const router = express.Router();
 
+// CEFR seeding endpoints - public (no token verification required)
+router.post("/survival/seed", triggerSeeding);
+
+// Authenticated routes below this point
 router.use(verifyToken);
 
 router.get("/survival/questions", getSurvivalQuestions);
 router.post("/survival/score", submitSurvivalScore);
 router.get("/survival/leaderboard", getSurvivalLeaderboard);
 router.get("/survival/stats", getSurvivalStats);
-
-// CEFR seeding endpoints
-router.post("/survival/seed", triggerSeeding);
 
 export default router;
