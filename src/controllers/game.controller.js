@@ -147,7 +147,10 @@ export const submitSurvivalScore = async (req, res) => {
 // GET /game/survival/leaderboard
 export const getSurvivalLeaderboard = async (req, res) => {
     try {
-        const topPlayers = await User.find({ survivalHighScore: { $gt: 0 } })
+        const topPlayers = await User.find({
+            survivalHighScore: { $gt: 0 },
+            email: { $ne: "system@ieltsapp.com" } // Exclude system/CEFR user
+        })
             .sort({ survivalHighScore: -1 })
             .limit(50)
             .select("name picture email survivalHighScore")
@@ -249,15 +252,27 @@ async function getOrCreateSystemUser() {
     return user._id;
 }
 
-export const triggerSeeding = async (req, res) => {
-    try {
-        const systemUserId = await getOrCreateSystemUser();
+// Background seeding state tracker
+const seedingState = { running: false, startedAt: null, log: [] };
 
-        // 1. Fetch Oxford 5000 vocabulary data
-        const response = await fetch("https://raw.githubusercontent.com/winterdl/oxford-5000-vocabulary-audio-definition/main/data/oxford_5000.json");
-        if (!response.ok) {
-            throw new Error(`Failed to fetch Oxford 5000 data: ${response.status}`);
+async function runSeedingInBackground(systemUserId) {
+    seedingState.running = true;
+    seedingState.startedAt = new Date().toISOString();
+    seedingState.log = [];
+
+    try {
+        // 1. Clear all old CEFR data owned by system user
+        const oldSets = await WordSet.find({ userId: systemUserId }).lean();
+        const oldSetIds = oldSets.map(s => s._id);
+        if (oldSetIds.length > 0) {
+            await Word.deleteMany({ setId: { $in: oldSetIds } });
+            await WordSet.deleteMany({ userId: systemUserId });
         }
+        seedingState.log.push(`Cleared ${oldSets.length} old sets and their words.`);
+
+        // 2. Fetch Oxford 5000 vocabulary data
+        const response = await fetch("https://raw.githubusercontent.com/winterdl/oxford-5000-vocabulary-audio-definition/main/data/oxford_5000.json");
+        if (!response.ok) throw new Error(`Failed to fetch Oxford 5000 data: ${response.status}`);
         const json = await response.json();
         const items = Object.values(json);
 
@@ -265,32 +280,19 @@ export const triggerSeeding = async (req, res) => {
         const grouped = { A1: [], A2: [], B1: [], B2: [], C1: [] };
         for (const item of items) {
             const lvl = (item.cefr || "").toUpperCase();
-            if (grouped[lvl]) {
-                grouped[lvl].push(item);
-            }
+            if (grouped[lvl]) grouped[lvl].push(item);
         }
 
-        const seededSummary = [];
-
-        // 2. Loop through each level and seed
+        // 3. Loop through each level and seed
         for (const [level, rawWords] of Object.entries(grouped)) {
             const setTitle = `CEFR ${level}`;
-            let wordSet = await WordSet.findOne({ title: setTitle, userId: systemUserId });
-            if (!wordSet) {
-                wordSet = await WordSet.create({
-                    title: setTitle,
-                    description: `Trọn bộ từ vựng Oxford cấp độ ${level} theo khung chuẩn châu Âu.`,
-                    userId: systemUserId,
-                    isPublic: true,
-                    color: LEVEL_COLORS[level] || "blue"
-                });
-            }
-
-            const existingCount = await Word.countDocuments({ setId: wordSet._id });
-            if (existingCount > 0) {
-                seededSummary.push({ level, count: existingCount, status: "Already seeded previously" });
-                continue;
-            }
+            const wordSet = await WordSet.create({
+                title: setTitle,
+                description: `Trọn bộ từ vựng Oxford cấp độ ${level} theo khung chuẩn châu Âu.`,
+                userId: systemUserId,
+                isPublic: true,
+                color: LEVEL_COLORS[level] || "blue"
+            });
 
             const wordsToInsert = [];
             for (let i = 0; i < rawWords.length; i += BATCH_SIZE) {
@@ -302,13 +304,12 @@ export const triggerSeeding = async (req, res) => {
                     const textToTranslate = batchWords.join(" | ");
                     const transRes = await translate(textToTranslate, { to: "vi" });
                     translatedList = transRes.text.split(" | ").map(t => t.trim());
-
                     if (translatedList.length !== batch.length) {
                         translatedList = [];
                         for (const w of batchWords) {
                             const singleRes = await translate(w, { to: "vi" });
                             translatedList.push(singleRes.text.trim());
-                            await delay(100);
+                            await delay(80);
                         }
                     }
                 } catch (err) {
@@ -317,41 +318,66 @@ export const triggerSeeding = async (req, res) => {
 
                 for (let j = 0; j < batch.length; j++) {
                     const item = batch[j];
-                    const viMeaning = translatedList[j] || item.word;
-
                     wordsToInsert.push({
                         english: item.word,
-                        vietnamese: viMeaning,
+                        vietnamese: translatedList[j] || item.word,
                         pronunciation: item.phon_br || item.phon_n_am || "",
                         partOfSpeech: item.type || "",
                         example: item.example || "",
                         exampleTranslation: "",
-                        synonyms: [],
-                        antonyms: [],
-                        note: "",
+                        synonyms: [], antonyms: [], note: "",
                         setId: wordSet._id,
                         userId: systemUserId
                     });
                 }
-                // Short politeness delay
-                await delay(200);
+                await delay(150);
             }
 
             if (wordsToInsert.length > 0) {
-                await Word.insertMany(wordsToInsert);
+                await Word.insertMany(wordsToInsert, { ordered: false });
                 wordSet.wordCount = wordsToInsert.length;
                 await wordSet.save();
-                seededSummary.push({ level, count: wordsToInsert.length, status: "Seeded successfully" });
-            } else {
-                seededSummary.push({ level, count: 0, status: "No words to insert" });
             }
+            seedingState.log.push(`Level ${level}: ${wordsToInsert.length} words seeded.`);
         }
+    } catch (err) {
+        seedingState.log.push(`ERROR: ${err.message}`);
+        console.error("[SEED ERROR]", err);
+    } finally {
+        seedingState.running = false;
+    }
+}
 
-        res.json({
-            message: "CEFR vocabulary seeded successfully!",
-            summary: seededSummary
+export const triggerSeeding = async (req, res) => {
+    if (seedingState.running) {
+        return res.json({
+            message: "Seeding is already running in the background!",
+            startedAt: seedingState.startedAt,
+            log: seedingState.log
         });
+    }
+
+    try {
+        const systemUserId = await getOrCreateSystemUser();
+
+        // Respond immediately so the request doesn't timeout
+        res.json({
+            message: "Seeding started in background! All old CEFR data will be cleared and re-seeded. This may take several minutes.",
+            startedAt: new Date().toISOString()
+        });
+
+        // Run the heavy work in the background after response is sent
+        runSeedingInBackground(systemUserId);
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
+};
+
+// GET /game/survival/seed-status - check seeding progress
+export const getSeedingStatus = (req, res) => {
+    res.json({
+        running: seedingState.running,
+        startedAt: seedingState.startedAt,
+        log: seedingState.log
+    });
 };

@@ -5,13 +5,15 @@ import {
     submitSurvivalScore,
     getSurvivalLeaderboard,
     getSurvivalStats,
-    triggerSeeding
+    triggerSeeding,
+    getSeedingStatus
 } from "../controllers/game.controller.js";
 
 const router = express.Router();
 
 // CEFR seeding endpoints - public (no token verification required)
 router.post("/survival/seed", triggerSeeding);
+router.get("/survival/seed-status", getSeedingStatus);
 
 // Authenticated routes below this point
 router.use(verifyToken);
