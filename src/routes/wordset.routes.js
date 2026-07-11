@@ -9,6 +9,7 @@ import {
     forkWordSet,
     toggleDisableWordSet,
     moveToFolder,
+    getCEFRTemplates,
 } from "../controllers/wordset.controller.js";
 
 const router = express.Router();
@@ -16,6 +17,7 @@ const router = express.Router();
 router.use(verifyToken); // Tất cả route ở đây đều cần auth
 
 router.get("/", getWordSets);
+router.get("/cefr-templates", getCEFRTemplates); // Lấy các bộ từ mẫu CEFR
 router.get("/public", getPublicSets);       // Bộ từ public của người khác
 router.post("/", createWordSet);
 router.put("/:id", updateWordSet);
@@ -23,5 +25,6 @@ router.patch("/:id/toggle-disable", toggleDisableWordSet); // Bật/tắt bộ t
 router.patch("/:id/move-to-folder", moveToFolder);         // Chuyển vào thư mục
 router.delete("/:id", deleteWordSet);
 router.post("/:id/fork", forkWordSet);      // Fork bộ từ public về tài khoản
+
 
 export default router;

@@ -18,7 +18,9 @@ export const getWordSets = async (req, res) => {
         const { folderId } = req.query;
 
         const query = { userId };
-        if (folderId === "root" || !folderId) {
+        if (folderId === "all") {
+            // Không lọc theo folderId để lấy tất cả bộ từ
+        } else if (folderId === "root" || !folderId) {
             query.folderId = null;
         } else {
             query.folderId = folderId;
@@ -256,3 +258,27 @@ export const moveToFolder = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+// GET /wordsets/cefr-templates — Lấy các bộ từ mẫu CEFR của hệ thống
+export const getCEFRTemplates = async (req, res) => {
+    try {
+        const systemUser = await User.findOne({ email: "system@ieltsapp.com" });
+        if (!systemUser) {
+            // Nếu chưa seed system user, thử tìm các bộ từ có title chứa "CEFR" và isPublic
+            const sets = await WordSet.find({ title: /^CEFR /i, isPublic: true })
+                .sort({ title: 1 })
+                .lean();
+            return res.json({ data: sets });
+        }
+
+        const sets = await WordSet.find({ userId: systemUser._id, isPublic: true })
+            .sort({ title: 1 })
+            .lean();
+
+        res.json({ data: sets });
+    } catch (err) {
+        console.error("[wordset] getCEFRTemplates error:", err);
+        res.status(500).json({ message: err.message });
+    }
+};
+
