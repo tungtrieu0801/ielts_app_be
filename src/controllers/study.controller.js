@@ -5,6 +5,7 @@ import UserCard from "../models/UserCard.js";
 import User from "../models/User.js";
 import StudyLog from "../models/StudyLog.js";
 import { calculateSRS } from "../utils/srs.js";
+import { markOnline } from "./ranking.controller.js";
 
 const SESSION_LIMIT = 20; // max cards per session
 
@@ -58,6 +59,7 @@ const ensureUserCards = async (userId, wordIds) => {
 export const getGlobalStudySession = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
+        await markOnline(userId);
         // const userId = "69e6ff095cfa9ca0641092ae";
         const now = new Date();
         const limit = req.query.limit ? parseInt(req.query.limit, 10) : SESSION_LIMIT;
@@ -207,6 +209,7 @@ export const getGlobalStudySession = async (req, res) => {
 export const getStudySession = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
+        await markOnline(userId);
         const { setId } = req.params;
         const excludeIdsStr = req.query.excludeIds || "";
 
@@ -320,6 +323,7 @@ export const getStudySession = async (req, res) => {
 export const batchSubmit = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
+        await markOnline(userId);
         const { answers } = req.body;
 
         if (!Array.isArray(answers) || answers.length === 0) {
