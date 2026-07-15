@@ -16,10 +16,17 @@ import gameRoutes from "./routes/game.routes.js";
 import dictationRoutes from "./routes/dictation.routes.js";
 import folderRoutes from "./routes/folder.routes.js";
 import rankingRoutes from "./routes/ranking.routes.js";
+import bookRoutes from "./routes/book.routes.js";
 import connectDB from "./config/db.js";
 import ChatMessage from "./models/ChatMessage.js";
 
+import path from "path";
+import { fileURLToPath } from "url";
+
 import { setupSocket } from "./services/socket.service.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const httpServer = createServer(app);
@@ -35,6 +42,10 @@ app.use(cors({
     origin: process.env.FRONTEND_URL || "http://localhost:5173",
     credentials: true,
 }));
+
+// Static files for uploads (books etc)
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+
 app.use(express.json());
 app.use(passport.initialize());
 
@@ -51,6 +62,7 @@ app.use("/study", studyRoutes);
 app.use("/dictation", dictationRoutes);
 app.use("/folders", folderRoutes);
 app.use("/ranking", rankingRoutes);
+app.use("/books", bookRoutes);
 
 // Health & Status check
 app.get("/", (req, res) => res.json({
