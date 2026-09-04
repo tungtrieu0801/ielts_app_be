@@ -89,7 +89,7 @@ export const getSurvivalQuestions = async (req, res) => {
 export const submitSurvivalScore = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
-        const { score, results, saveWords = true } = req.body;
+        const { score, results, saveWords = false } = req.body;
 
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ message: "User not found" });
@@ -102,8 +102,8 @@ export const submitSurvivalScore = async (req, res) => {
             isNewHighScore = true;
         }
 
-        // Process results to update UserCards (only if saveWords option is enabled)
-        if (saveWords !== false && Array.isArray(results) && results.length > 0) {
+        // Process results to update UserCards (only if saveWords option is explicitly enabled)
+        if (saveWords === true && Array.isArray(results) && results.length > 0) {
             const bulkOps = results.map(item => {
                 const isCorrect = !!item.correct;
                 return {
