@@ -120,3 +120,55 @@ export const getAdminDashboardData = async (req, res) => {
         return res.status(500).json({ error: "Lỗi hệ thống khi tải dữ liệu Admin Dashboard." });
     }
 };
+
+/**
+ * GET /api/admin/users/:userId/videos
+ * Lấy danh sách video (DictationProgress) của một user cụ thể.
+ */
+export const getUserVideos = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const rawProgresses = await DictationProgress.find({ userId })
+            .sort({ updatedAt: -1 })
+            .lean();
+
+        if (rawProgresses.length === 0) {
+            return res.json({ videos: [] });
+        }
+
+        // Map titles from YoutubeCache
+        const videoIds = Array.from(new Set(rawProgresses.map(p => p.videoId)));
+        const videoCaches = await YoutubeCache.find({ videoId: { $in: videoIds } })
+            .select("videoId title total")
+            .lean();
+
+        const cacheMap = {};
+        videoCaches.forEach(v => { cacheMap[v.videoId] = v; });
+
+        const videos = rawProgresses.map(p => {
+            const cache = cacheMap[p.videoId];
+            const doneCount = Array.isArray(p.done) ? p.done.length : 0;
+            const totalSentences = cache?.total || (p.idx ? p.idx + 1 : doneCount);
+            const progressPercent = totalSentences > 0
+                ? Math.min(100, Math.round((doneCount / totalSentences) * 100))
+                : 0;
+
+            return {
+                id: p._id,
+                videoId: p.videoId,
+                videoTitle: cache?.title || `YouTube Video (${p.videoId})`,
+                doneCount,
+                totalSentences,
+                progressPercent,
+                stats: p.stats || { correct: 0, wrong: 0 },
+                updatedAt: p.updatedAt
+            };
+        });
+
+        return res.json({ videos });
+    } catch (err) {
+        console.error("[admin] getUserVideos error:", err);
+        return res.status(500).json({ error: "Lỗi khi tải danh sách video của người dùng." });
+    }
+};
