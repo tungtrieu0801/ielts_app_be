@@ -45,6 +45,15 @@ jobs:
           docker push tungtrieu0801/ielts_app_be:latest
           docker push tungtrieu0801/ielts_app_be:$BACKUP_TAG
 
+      - name: Check SSH key
+        shell: bash
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          printf '%s\n' "$SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          ssh-keygen -lf /tmp/deploy_key
+
       # 5. SSH vào VPS và deploy
       - name: Deploy to VPS via SSH
         uses: appleboy/ssh-action@v0.1.6
