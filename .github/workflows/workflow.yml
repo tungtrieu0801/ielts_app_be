@@ -55,10 +55,13 @@ jobs:
             cd /opt/ielts_app
 
             docker pull tungtrieu0801/ielts_app_be:$IMAGE_TAG
+            docker pull tungtrieu0801/ielts_app_be:latest
 
             docker compose stop backend || true
 
             docker rm -f ielts_app_be || true
+
+            docker compose pull backend || true
 
             docker compose up -d
 
