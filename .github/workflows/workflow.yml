@@ -61,24 +61,32 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: IMAGE_TAG BACKUP_TAG
+          port: 22
           script: |
-            cd /opt/ielts_app
-            
-            export IMAGE_TAG=${IMAGE_TAG:-latest}
-            export BACKUP_TAG=${BACKUP_TAG:-backup-latest}
+            echo "===== DEBUG DOCKER ====="
 
-            echo "👉 Pull image"
-            docker pull tungtrieu0801/ielts_app_be:$IMAGE_TAG
+            echo "PATH=$PATH"
+            echo "USER=$(whoami)"
 
-            echo "👉 Stop backend"
-            docker-compose stop backend || true
+            echo "--- which docker ---"
+            which docker
 
-            echo "👉 Remove old container"
-            docker rm -f ielts_app_be || true
+            echo "--- docker --version ---"
+            docker --version
 
-            echo "👉 Start full stack (IMPORTANT)"
-            docker-compose up -d
+            echo "--- docker version ---"
+            docker version
 
-            echo "👉 Cleanup images"
-            docker image prune -f
+            echo "--- which docker-compose ---"
+            which docker-compose
+
+            echo "--- docker-compose version ---"
+            docker-compose version
+
+            echo "--- docker compose version ---"
+            docker compose version
+
+            echo "--- environment ---"
+            env | grep -E 'DOCKER|PATH' || true
+
+            echo "===== END DEBUG ====="
