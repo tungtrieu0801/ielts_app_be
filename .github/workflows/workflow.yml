@@ -26,17 +26,17 @@ jobs:
         run: |
           IMAGE_TAG=${GITHUB_SHA::7}
           BACKUP_TAG=backup-${IMAGE_TAG}
+
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
           echo "BACKUP_TAG=$BACKUP_TAG" >> $GITHUB_ENV
 
-          # Build image
           docker build -t tungtrieu0801/ielts_app_be:$IMAGE_TAG .
 
-          # Tag latest
-          docker tag tungtrieu0801/ielts_app_be:$IMAGE_TAG tungtrieu0801/ielts_app_be:latest
+          docker tag tungtrieu0801/ielts_app_be:$IMAGE_TAG \
+            tungtrieu0801/ielts_app_be:latest
 
-          # Tag backup image
-          docker tag tungtrieu0801/ielts_app_be:$IMAGE_TAG tungtrieu0801/ielts_app_be:$BACKUP_TAG
+          docker tag tungtrieu0801/ielts_app_be:$IMAGE_TAG \
+            tungtrieu0801/ielts_app_be:$BACKUP_TAG
 
       # 4. Push Docker images
       - name: Push Docker images
@@ -45,16 +45,7 @@ jobs:
           docker push tungtrieu0801/ielts_app_be:latest
           docker push tungtrieu0801/ielts_app_be:$BACKUP_TAG
 
-      - name: Check SSH key
-        shell: bash
-        env:
-          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-        run: |
-          printf '%s\n' "$SSH_KEY" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-          ssh-keygen -lf /tmp/deploy_key
-
-      # 5. SSH vào VPS và deploy
+      # 5. Deploy to VPS
       - name: Deploy to VPS via SSH
         uses: appleboy/ssh-action@v0.1.6
         with:
@@ -62,31 +53,18 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: 22
+          envs: IMAGE_TAG BACKUP_TAG
           script: |
-            echo "===== DEBUG DOCKER ====="
+            set -e
 
-            echo "PATH=$PATH"
-            echo "USER=$(whoami)"
+            cd /opt/ielts_app
 
-            echo "--- which docker ---"
-            which docker
+            docker pull tungtrieu0801/ielts_app_be:$IMAGE_TAG
 
-            echo "--- docker --version ---"
-            docker --version
+            docker compose stop backend || true
 
-            echo "--- docker version ---"
-            docker version
+            docker rm -f ielts_app_be || true
 
-            echo "--- which docker-compose ---"
-            which docker-compose
+            docker compose up -d
 
-            echo "--- docker-compose version ---"
-            docker-compose version
-
-            echo "--- docker compose version ---"
-            docker compose version
-
-            echo "--- environment ---"
-            env | grep -E 'DOCKER|PATH' || true
-
-            echo "===== END DEBUG ====="
+            docker image prune -f
