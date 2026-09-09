@@ -10,6 +10,9 @@ const todayUTC = () => new Date().toISOString().slice(0, 10);
  */
 export const markOnline = async (userId) => {
     const date = todayUTC();
+    // Update lastActive timestamp on User
+    User.findByIdAndUpdate(userId, { lastActive: new Date() }).catch(e => console.error("Error updating lastActive:", e));
+
     const log = await OnlineLog.findOne({ user: userId, date });
 
     if (log) {

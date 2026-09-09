@@ -14,7 +14,13 @@ export const verifyToken = (req, res, next) => {
         // decoded: { id (googleId), email, name,... }
         req.user = decoded;
         next();
-    } catch (err) {
-        return res.status(401).json({ message: "Unauthorized: Invalid or expired token" });
     }
 };
+
+export const adminOnly = (req, res, next) => {
+    if (!req.user || req.user.email?.toLowerCase() !== "tungvp@gmail.com") {
+        return res.status(403).json({ message: "Access Denied: Only tungvp@gmail.com has access to this dashboard." });
+    }
+    next();
+};
+
