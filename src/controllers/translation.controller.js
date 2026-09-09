@@ -1,6 +1,36 @@
 import mongoose from "mongoose";
+import translate from "google-translate-api-x";
 import TranslationSession from "../models/TranslationSession.js";
 import User from "../models/User.js";
+
+const wordCache = new Map();
+
+// GET /translation/lookup-word?word=...
+export const lookupWord = async (req, res) => {
+    try {
+        const { word } = req.query;
+        if (!word || !word.trim()) {
+            return res.status(400).json({ message: "Thiếu từ cần tra" });
+        }
+        const cleanWord = word.trim().toLowerCase();
+
+        if (wordCache.has(cleanWord)) {
+            return res.json({ word: cleanWord, translation: wordCache.get(cleanWord) });
+        }
+
+        const transRes = await translate(cleanWord, { to: "vi" });
+        const translationText = transRes?.text || "";
+
+        if (translationText) {
+            wordCache.set(cleanWord, translationText);
+        }
+
+        return res.json({ word: cleanWord, translation: translationText });
+    } catch (error) {
+        console.error("Backend word lookup error:", error.message);
+        return res.status(500).json({ message: "Lỗi tra từ máy chủ", translation: "" });
+    }
+};
 
 const getMongoUserId = async (userObj) => {
     if (!userObj) throw new Error("Unauthorized");

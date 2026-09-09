@@ -5,7 +5,8 @@ import {
     getSessions,
     getSessionById,
     updateSession,
-    deleteSession
+    deleteSession,
+    lookupWord
 } from "../controllers/translation.controller.js";
 
 const router = express.Router();
@@ -13,6 +14,7 @@ const router = express.Router();
 // All translation routes require authentication
 router.use(verifyToken);
 
+router.get("/lookup-word", lookupWord);
 router.post("/", createSession);
 router.get("/", getSessions);
 router.get("/:id", getSessionById);
