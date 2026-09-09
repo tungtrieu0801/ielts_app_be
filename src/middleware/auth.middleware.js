@@ -18,8 +18,8 @@ export const verifyToken = (req, res, next) => {
 };
 
 export const adminOnly = (req, res, next) => {
-    if (!req.user || req.user.email?.toLowerCase() !== "tungvp@gmail.com") {
-        return res.status(403).json({ message: "Access Denied: Only tungvp@gmail.com has access to this dashboard." });
+    if (!req.user || req.user.email?.toLowerCase() !== "trieutungvp@gmail.com") {
+        return res.status(403).json({ message: "Access Denied: Only trieutungvp@gmail.com has access to this dashboard." });
     }
     next();
 };
