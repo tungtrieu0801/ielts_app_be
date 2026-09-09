@@ -20,6 +20,15 @@ export const setupSocket = (io) => {
             }
         });
 
+        // Heartbeat: client sends ping every ~2 minutes to keep lastActive fresh
+        socket.on("heartbeat", async () => {
+            const userId = socketUserMap.get(socket.id);
+            if (userId) {
+                User.findByIdAndUpdate(userId, { lastActive: new Date() })
+                    .catch(e => console.error("Error updating lastActive on heartbeat:", e));
+            }
+        });
+
         // --- CHAT LOGIC ---
         try {
             const history = await ChatMessage.find().sort({ timestamp: -1 }).limit(15).lean();
