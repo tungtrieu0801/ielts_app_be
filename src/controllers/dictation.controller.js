@@ -19,12 +19,17 @@ import DictationProgress, { RecentVideos } from "../models/DictationProgress.js"
  * Output: 'What is this?'   or  'I said hello'
  */
 function cleanOriginal(text) {
+    if (!text || typeof text !== 'string') return '';
     return text
+        .replace(/&gt;/gi, '>')
+        .replace(/&lt;/gi, '<')
         .replace(/\\"/g, '')     // \" → bỏ
         .replace(/\\'/g, '')     // \' → bỏ
         .replace(/\\\\/g, '')   // \\ → bỏ
         .replace(/^"+|"+$/g, '') // dấu " đầu/cuối → bỏ
         .replace(/^'+|'+$/g, '') // dấu ' đầu/cuối → bỏ
+        .replace(/^(?:\s*>+)+/g, '') // Strips leading >>, >>>, > and spaces
+        .replace(/^(?:\s*>+)+/g, '')
         .replace(/\s+/g, ' ')   // normalize spaces
         .trim();
 }
@@ -447,9 +452,17 @@ export const prepareYoutube = async (req, res) => {
             console.log(`[dictation] Cache HIT for videoId=${videoId}`);
             let savedProgress = null;
             if (userId) savedProgress = await DictationProgress.findOne({ userId, videoId }).lean();
+
+            // Clean any leading >> from cached exercises
+            const cleanedExercises = (cached.exercises || []).map(ex => ({
+                ...ex,
+                original: cleanOriginal(ex.original || ex.text || ''),
+                translated: cleanOriginal(ex.translated || ex.vietnamese || '')
+            }));
+
             return res.json({
                 mode: 'youtube',
-                exercises: cached.exercises,
+                exercises: cleanedExercises,
                 total: cached.total,
                 videoId,
                 title: cached.title,
@@ -489,7 +502,7 @@ export const prepareYoutube = async (req, res) => {
                     const results = await translate(texts, { to: 'vi', forceBatch: false });
                     const arr = Array.isArray(results) ? results : [results];
                     for (let j = 0; j < batch.length; j++) {
-                        if (arr[j]?.text) batch[j].translated = arr[j].text;
+                        if (arr[j]?.text) batch[j].translated = cleanOriginal(arr[j].text);
                     }
                 } catch (batchErr) {
                     console.warn(`[dictation] Batch ${bi}-${bi + BATCH_SIZE} lỗi:`, batchErr.message);
