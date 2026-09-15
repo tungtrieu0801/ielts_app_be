@@ -44,13 +44,13 @@ const getMongoUserId = async (userObj) => {
 };
 
 /**
- * Split text into sentences using English punctuation regex while preserving basic structure.
+ * Split text into paragraphs using line breaks (Enter key / \n).
  */
-function splitIntoSentences(text) {
+function splitIntoParagraphs(text) {
     if (!text || typeof text !== "string") return [];
-    // Split by newlines or sentence-ending punctuation (. ! ?) followed by space/newline
-    const rawUnits = text.split(/(?<=[.!?])\s+|\n+/);
-    const sentences = rawUnits
+    // Split strictly by line breaks / Enter key
+    const rawUnits = text.split(/\r?\n+/);
+    const paragraphs = rawUnits
         .map(s => s.trim())
         .filter(s => s.length > 0)
         .map(s => ({
@@ -59,7 +59,7 @@ function splitIntoSentences(text) {
             polishedTranslation: "",
             notes: ""
         }));
-    return sentences;
+    return paragraphs;
 }
 
 // POST /translation - Create new session
@@ -81,7 +81,7 @@ export const createSession = async (req, res) => {
                 notes: ""
             } : s);
         } else if (text && text.trim()) {
-            parsedSentences = splitIntoSentences(text);
+            parsedSentences = splitIntoParagraphs(text);
         }
 
         if (parsedSentences.length === 0) {
