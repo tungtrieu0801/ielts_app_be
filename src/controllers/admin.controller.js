@@ -1,5 +1,6 @@
+import mongoose from "mongoose";
 import User from "../models/User.js";
-import DictationProgress from "../models/DictationProgress.js";
+import DictationProgress, { RecentVideos } from "../models/DictationProgress.js";
 import YoutubeCache from "../models/YoutubeCache.js";
 import WordSet from "../models/WordSet.js";
 
@@ -172,3 +173,110 @@ export const getUserVideos = async (req, res) => {
         return res.status(500).json({ error: "Lỗi khi tải danh sách video của người dùng." });
     }
 };
+
+/**
+ * GET /api/admin/videos
+ * Lấy danh sách tất cả các video YouTube có trên hệ thống (YoutubeCache)
+ * kèm số lượng người học và thông tin thống kê.
+ */
+export const getAllSystemVideos = async (req, res) => {
+    try {
+        const videos = await YoutubeCache.find()
+            .sort({ createdAt: -1 })
+            .lean();
+
+        // Get learner count per videoId
+        const progresses = await DictationProgress.find()
+            .select("videoId userId done")
+            .lean();
+
+        const learnerCountMap = {};
+        const totalDoneMap = {};
+
+        progresses.forEach(p => {
+            if (!p.videoId) return;
+            if (!learnerCountMap[p.videoId]) learnerCountMap[p.videoId] = new Set();
+            if (p.userId) learnerCountMap[p.videoId].add(p.userId.toString());
+
+            const doneCount = Array.isArray(p.done) ? p.done.length : 0;
+            totalDoneMap[p.videoId] = (totalDoneMap[p.videoId] || 0) + doneCount;
+        });
+
+        const videoList = videos.map(v => ({
+            id: v._id,
+            videoId: v.videoId,
+            title: v.title || `YouTube Video (${v.videoId})`,
+            url: v.url,
+            totalSentences: v.total || (Array.isArray(v.exercises) ? v.exercises.length : 0),
+            totalLearners: learnerCountMap[v.videoId] ? learnerCountMap[v.videoId].size : 0,
+            totalDoneSentences: totalDoneMap[v.videoId] || 0,
+            createdAt: v.createdAt,
+            updatedAt: v.updatedAt
+        }));
+
+        return res.json({ videos: videoList });
+    } catch (err) {
+        console.error("[admin] getAllSystemVideos error:", err);
+        return res.status(500).json({ error: "Lỗi khi tải danh sách video hệ thống." });
+    }
+};
+
+/**
+ * DELETE /api/admin/videos/:videoId
+ * Xóa video khỏi thư viện hệ thống và xóa sạch toàn bộ lịch sử học, tiến trình của tất cả người dùng.
+ * Bắt buộc chỉ trieutungvp@gmail.com được phép gọi API này.
+ */
+export const deleteSystemVideo = async (req, res) => {
+    try {
+        const { videoId } = req.params;
+        const reqEmail = req.user?.email?.toLowerCase();
+
+        if (reqEmail !== "trieutungvp@gmail.com") {
+            return res.status(403).json({ error: "Chỉ tài khoản trieutungvp@gmail.com mới có quyền xóa video." });
+        }
+
+        if (!videoId) {
+            return res.status(400).json({ error: "Thiếu tham số videoId." });
+        }
+
+        const isObjId = mongoose.isValidObjectId(videoId);
+        const matchCondition = isObjId ? { $or: [{ videoId: videoId }, { _id: videoId }] } : { videoId: videoId };
+
+        // Find actual target videoId string if ObjectId was passed
+        let targetVideoId = videoId;
+        if (isObjId) {
+            const foundCache = await YoutubeCache.findOne(matchCondition).lean();
+            if (foundCache) targetVideoId = foundCache.videoId;
+        }
+
+        // 1. Delete YoutubeCache entry
+        const cacheResult = await YoutubeCache.deleteMany({
+            $or: [{ videoId: targetVideoId }, { videoId: videoId }]
+        });
+
+        // 2. Delete all DictationProgress entries matching targetVideoId or videoId
+        const progressResult = await DictationProgress.deleteMany({
+            $or: [{ videoId: targetVideoId }, { videoId: videoId }]
+        });
+
+        // 3. Pull videoId from RecentVideos videoIds array across all users
+        const recentResult = await RecentVideos.updateMany(
+            { $or: [{ videoIds: targetVideoId }, { videoIds: videoId }] },
+            { $pull: { videoIds: { $in: [targetVideoId, videoId] } } }
+        );
+
+        console.log(`[admin] Deleted video (${targetVideoId}): YoutubeCache=${cacheResult.deletedCount}, DictationProgress=${progressResult.deletedCount}, RecentVideos=${recentResult.modifiedCount}`);
+
+        return res.json({
+            success: true,
+            message: `Đã xóa thành công video (${targetVideoId}) cùng toàn bộ tiến trình học của tất cả người dùng.`,
+            deletedCacheCount: cacheResult.deletedCount,
+            deletedProgressCount: progressResult.deletedCount,
+            modifiedRecentCount: recentResult.modifiedCount
+        });
+    } catch (err) {
+        console.error("[admin] deleteSystemVideo error:", err);
+        return res.status(500).json({ error: "Lỗi khi xóa video khỏi hệ thống." });
+    }
+};
+
