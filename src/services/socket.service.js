@@ -1,6 +1,7 @@
 import ChatMessage from "../models/ChatMessage.js";
 import Word from "../models/Word.js";
 import { markOnline, markOffline } from "../controllers/ranking.controller.js";
+import User from "../models/User.js";
 
 // userId map: socketId → userId
 const socketUserMap = new Map();
@@ -130,9 +131,9 @@ export const setupSocket = (io) => {
 
             room.activeWord = word;
             room.phase = "answering";
-            
+
             const hint = word.english.split(' ').map(w => '_'.repeat(w.length)).join('   ');
-            
+
             io.to(roomId).emit("game_card_picked", {
                 word: { _id: word._id, vietnamese: word.vietnamese, hint },
                 challengerId: socket.id,
@@ -151,7 +152,7 @@ export const setupSocket = (io) => {
 
             const word = room.activeWord;
             const isCorrect = word.english.toLowerCase().trim() === answer.toLowerCase().trim();
-            
+
             if (isCorrect) {
                 room.scores[socket.id] += 1;
             } else {
