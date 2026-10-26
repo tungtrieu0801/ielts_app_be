@@ -19,6 +19,7 @@ import rankingRoutes from "./routes/ranking.routes.js";
 import bookRoutes from "./routes/book.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import translationRoutes from "./routes/translation.routes.js";
+import synonymRoutes from "./routes/synonym.routes.js";
 import connectDB from "./config/db.js";
 import ChatMessage from "./models/ChatMessage.js";
 
@@ -67,6 +68,7 @@ app.use("/ranking", rankingRoutes);
 app.use("/books", bookRoutes);
 app.use("/admin", adminRoutes);
 app.use("/translation", translationRoutes);
+app.use("/synonyms", synonymRoutes);
 
 // Health & Status check
 app.get("/", (req, res) => res.json({
