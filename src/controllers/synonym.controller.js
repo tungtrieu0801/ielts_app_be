@@ -23,7 +23,6 @@ export const importSynonyms = async (req, res) => {
             return res.status(400).json({ message: "Danh sách từ không hợp lệ." });
         }
 
-        // Validate and sanitize
         const docs = words.map((w) => ({
             cluster: (w.cluster || "").trim(),
             word: (w.word || "").trim(),
@@ -60,12 +59,10 @@ export const getClusters = async (req, res) => {
         const showAllUsers = showAll === "true";
         const matchFilter = showAllUsers ? {} : { userId };
 
-        // If search, filter clusters by name
         if (search) {
             matchFilter.cluster = { $regex: search, $options: "i" };
         }
 
-        // Get unique clusters with word counts
         const pipeline = [
             { $match: matchFilter },
             {
@@ -82,11 +79,9 @@ export const getClusters = async (req, res) => {
         const allClusters = await SynonymWord.aggregate(pipeline);
         const totalClusters = allClusters.length;
 
-        // Manual pagination
         const skip = (parseInt(page) - 1) * parseInt(limit);
         const paginatedClusters = allClusters.slice(skip, skip + parseInt(limit));
 
-        // Get progress for each cluster
         const clusterNames = paginatedClusters.map((c) => c._id);
         const progresses = await SynonymProgress.find({
             userId,
@@ -126,14 +121,12 @@ export const getNextCluster = async (req, res) => {
         const showAllUsers = showAll === "true";
         const matchFilter = showAllUsers ? {} : { userId };
 
-        // Get all unique cluster names
         const allClusters = await SynonymWord.distinct("cluster", matchFilter);
 
         if (allClusters.length === 0) {
             return res.status(404).json({ message: "Chưa có cluster nào." });
         }
 
-        // Get user's progress for these clusters
         const progresses = await SynonymProgress.find({
             userId,
             cluster: { $in: allClusters },
@@ -144,10 +137,6 @@ export const getNextCluster = async (req, res) => {
             progressMap[p.cluster] = p;
         });
 
-        // Sort clusters: 
-        // 1. Never studied (no progress) → first
-        // 2. Most wrong answers → second
-        // 3. Oldest studied → third
         const sorted = allClusters.map((cluster) => {
             const p = progressMap[cluster];
             return {
@@ -158,33 +147,24 @@ export const getNextCluster = async (req, res) => {
                 mastery: p ? p.mastery : 0,
             };
         }).sort((a, b) => {
-            // Never studied first
             if (!a.hasProgress && b.hasProgress) return -1;
             if (a.hasProgress && !b.hasProgress) return 1;
-
-            // Both have progress: most wrong first
             if (a.wrongCount !== b.wrongCount) return b.wrongCount - a.wrongCount;
-
-            // Same wrong count: oldest studied first
             if (a.lastStudied && b.lastStudied) {
                 return new Date(a.lastStudied) - new Date(b.lastStudied);
             }
             return 0;
         });
 
-        // Pick the first (most needed) cluster
         const targetCluster = sorted[0].cluster;
 
-        // Get all words in that cluster
         const words = await SynonymWord.find({
             cluster: targetCluster,
             ...(showAllUsers ? {} : { userId }),
         }).lean();
 
-        // Build quiz: for each word, create a fill-in-blank question from exampleSentence
         const questions = words.map((w) => {
             let blankedSentence = w.exampleSentence;
-            // Replace the word in the sentence with a blank
             if (w.exampleSentence && w.word) {
                 const regex = new RegExp(`\\b${escapeRegex(w.word)}\\b`, "gi");
                 blankedSentence = w.exampleSentence.replace(regex, "________");
@@ -202,10 +182,7 @@ export const getNextCluster = async (req, res) => {
             };
         });
 
-        // Shuffle questions for randomness
         const shuffled = shuffle(questions);
-
-        // All words in this cluster (for answer options)
         const allWords = words.map((w) => w.word);
 
         return res.json({
@@ -221,12 +198,18 @@ export const getNextCluster = async (req, res) => {
     }
 };
 
-// ─── GET SPECIFIC CLUSTER FOR STUDY ─────────────────────────────────
+// ─── GET SPECIFIC CLUSTER FOR STUDY (ĐÃ SỬA SANG QUERY PARAM) ───────
 export const getCluster = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
-        const { clusterName } = req.params;
+        // Lấy từ req.query thay vì req.params
+        const clusterName = (req.query.clusterName || "").trim();
         const { showAll } = req.query;
+
+        if (!clusterName) {
+            return res.status(400).json({ message: "Thiếu tên cluster." });
+        }
+
         const showAllUsers = showAll === "true";
         const matchFilter = { cluster: clusterName };
         if (!showAllUsers) matchFilter.userId = userId;
@@ -271,7 +254,7 @@ export const getCluster = async (req, res) => {
     }
 };
 
-// ─── SAVE PROGRESS (after completing a cluster quiz) ────────────────
+// ─── SAVE PROGRESS ──────────────────────────────────────────────────
 export const saveProgress = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
@@ -284,7 +267,6 @@ export const saveProgress = async (req, res) => {
         const totalAttempted = (correctCount || 0) + (wrongCount || 0);
         const accuracy = totalAttempted > 0 ? (correctCount || 0) / totalAttempted : 0;
 
-        // Calculate mastery: 0=new, 1=learning, 2=familiar, 3=mastered
         let masteryDelta = 0;
         if (accuracy >= 0.9) masteryDelta = 1;
         else if (accuracy < 0.5) masteryDelta = -1;
@@ -304,7 +286,6 @@ export const saveProgress = async (req, res) => {
             { upsert: true, new: true }
         );
 
-        // Update mastery level (clamp between 0-3)
         const newMastery = Math.max(0, Math.min(3, progress.mastery + masteryDelta));
         if (newMastery !== progress.mastery) {
             progress.mastery = newMastery;
@@ -344,12 +325,16 @@ export const getProgressOverview = async (req, res) => {
     }
 };
 
-// ─── MANAGE: Get words by cluster (own words only, paginated) ────────
+// ─── MANAGE: Get words by cluster (ĐÃ SỬA SANG QUERY PARAM) ─────────
 export const getWordsByCluster = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
-        const { clusterName } = req.params;
+        const clusterName = (req.query.clusterName || "").trim();
         const { page = 1, limit = 20 } = req.query;
+
+        if (!clusterName) {
+            return res.status(400).json({ message: "Thiếu tên cluster." });
+        }
 
         const filter = { userId, cluster: clusterName };
         const total = await SynonymWord.countDocuments(filter);
@@ -383,7 +368,6 @@ export const updateWord = async (req, res) => {
             return res.status(404).json({ message: "Không tìm thấy từ hoặc không có quyền sửa." });
         }
 
-        // Allowed fields to update
         const allowed = ["word", "partOfSpeech", "bandLevel", "explanation", "exampleSentence", "exampleTranslation", "cluster"];
         allowed.forEach((field) => {
             if (updateData[field] !== undefined) {
@@ -418,11 +402,15 @@ export const deleteWord = async (req, res) => {
     }
 };
 
-// ─── DELETE ENTIRE CLUSTER ───────────────────────────────────────────
+// ─── DELETE ENTIRE CLUSTER (ĐÃ SỬA SANG QUERY PARAM) ────────────────
 export const deleteCluster = async (req, res) => {
     try {
         const userId = await getUserMongoId(req.user.id);
-        const { clusterName } = req.params;
+        const clusterName = (req.query.clusterName || "").trim();
+
+        if (!clusterName) {
+            return res.status(400).json({ message: "Thiếu tên cluster." });
+        }
 
         const result = await SynonymWord.deleteMany({ cluster: clusterName, userId });
         await SynonymProgress.deleteOne({ userId, cluster: clusterName });
