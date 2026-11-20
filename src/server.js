@@ -76,7 +76,10 @@ app.get("/", (req, res) => res.json({
     status: "ok",
     timestamp: new Date()
 }));
-app.get("/health", (req, res) => res.json({ status: "ok" }));
+app.get("/health", (req, res) => res.status(200).send("ok hello word"));
+app.get(["/check-health", "/health-check", "/checkhealth", "/api/check-health"], (req, res) => {
+    res.status(200).send("ok hello word");
+});
 
 const PORT = process.env.PORT || 5000;
 
