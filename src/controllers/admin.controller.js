@@ -3,6 +3,17 @@ import User from "../models/User.js";
 import DictationProgress, { RecentVideos } from "../models/DictationProgress.js";
 import YoutubeCache from "../models/YoutubeCache.js";
 import WordSet from "../models/WordSet.js";
+import Word from "../models/Word.js";
+import Folder from "../models/Folder.js";
+import StudyLog from "../models/StudyLog.js";
+import OnlineLog from "../models/OnlineLog.js";
+import Book from "../models/Book.js";
+import BookProgress from "../models/BookProgress.js";
+import ChatMessage from "../models/ChatMessage.js";
+import TranslationSession from "../models/TranslationSession.js";
+import SynonymWord from "../models/SynonymWord.js";
+import SynonymProgress from "../models/SynonymProgress.js";
+import UserCard from "../models/UserCard.js";
 
 /**
  * GET /api/admin/dashboard
@@ -280,3 +291,163 @@ export const deleteSystemVideo = async (req, res) => {
     }
 };
 
+/**
+ * GET /api/admin/backup/export
+ * Export toàn bộ dữ liệu MongoDB ra file JSON để backup.
+ * Chỉ admin (trieutungvp@gmail.com) mới được phép.
+ */
+export const exportDatabase = async (req, res) => {
+    try {
+        const reqEmail = req.user?.email?.toLowerCase();
+        if (reqEmail !== "trieutungvp@gmail.com") {
+            return res.status(403).json({ error: "Chỉ tài khoản trieutungvp@gmail.com mới có quyền export database." });
+        }
+
+        const [
+            users,
+            wordSets,
+            words,
+            dictationProgresses,
+            recentVideos,
+            youtubeCaches,
+            folders,
+            studyLogs,
+            onlineLogs,
+            books,
+            bookProgresses,
+            chatMessages,
+            translationSessions,
+            synonymWords,
+            synonymProgresses,
+            userCards,
+        ] = await Promise.all([
+            User.find().lean(),
+            WordSet.find().lean(),
+            Word.find().lean(),
+            DictationProgress.find().lean(),
+            RecentVideos.find().lean(),
+            YoutubeCache.find().lean(),
+            Folder.find().lean(),
+            StudyLog.find().lean(),
+            OnlineLog.find().lean(),
+            Book.find().lean(),
+            BookProgress.find().lean(),
+            ChatMessage.find().lean(),
+            TranslationSession.find().lean(),
+            SynonymWord.find().lean(),
+            SynonymProgress.find().lean(),
+            UserCard.find().lean(),
+        ]);
+
+        const backup = {
+            exportedAt: new Date().toISOString(),
+            exportedBy: req.user.email,
+            version: "1.0",
+            collections: {
+                users,
+                wordSets,
+                words,
+                dictationProgresses,
+                recentVideos,
+                youtubeCaches,
+                folders,
+                studyLogs,
+                onlineLogs,
+                books,
+                bookProgresses,
+                chatMessages,
+                translationSessions,
+                synonymWords,
+                synonymProgresses,
+                userCards,
+            }
+        };
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        const filename = `ielts_backup_${timestamp}.json`;
+
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        res.json(backup);
+
+        console.log(`[admin] Database exported by ${req.user.email} at ${new Date().toISOString()}`);
+    } catch (err) {
+        console.error("[admin] exportDatabase error:", err);
+        return res.status(500).json({ error: "Lỗi khi export database." });
+    }
+};
+
+/**
+ * POST /api/admin/backup/import
+ * Import dữ liệu từ file JSON backup vào MongoDB (upsert theo _id).
+ * Chỉ admin (trieutungvp@gmail.com) mới được phép.
+ */
+export const importDatabase = async (req, res) => {
+    try {
+        const reqEmail = req.user?.email?.toLowerCase();
+        if (reqEmail !== "trieutungvp@gmail.com") {
+            return res.status(403).json({ error: "Chỉ tài khoản trieutungvp@gmail.com mới có quyền import database." });
+        }
+
+        if (!req.body || !req.body.collections) {
+            return res.status(400).json({ error: "Dữ liệu backup không hợp lệ. Thiếu trường 'collections'." });
+        }
+
+        const { collections } = req.body;
+
+        const MODEL_MAP = [
+            { key: "users",                Model: User },
+            { key: "wordSets",             Model: WordSet },
+            { key: "words",                Model: Word },
+            { key: "dictationProgresses",  Model: DictationProgress },
+            { key: "recentVideos",         Model: RecentVideos },
+            { key: "youtubeCaches",        Model: YoutubeCache },
+            { key: "folders",             Model: Folder },
+            { key: "studyLogs",            Model: StudyLog },
+            { key: "onlineLogs",           Model: OnlineLog },
+            { key: "books",                Model: Book },
+            { key: "bookProgresses",       Model: BookProgress },
+            { key: "chatMessages",         Model: ChatMessage },
+            { key: "translationSessions",  Model: TranslationSession },
+            { key: "synonymWords",         Model: SynonymWord },
+            { key: "synonymProgresses",    Model: SynonymProgress },
+            { key: "userCards",            Model: UserCard },
+        ];
+
+        const results = {};
+
+        for (const { key, Model } of MODEL_MAP) {
+            const docs = collections[key];
+            if (!Array.isArray(docs) || docs.length === 0) {
+                results[key] = { upserted: 0, skipped: true };
+                continue;
+            }
+
+            const ops = docs.map(doc => ({
+                updateOne: {
+                    filter: { _id: doc._id },
+                    update: { $set: doc },
+                    upsert: true
+                }
+            }));
+
+            const result = await Model.bulkWrite(ops, { ordered: false });
+            results[key] = {
+                upserted: (result.upsertedCount || 0) + (result.modifiedCount || 0),
+                total: docs.length
+            };
+        }
+
+        console.log(`[admin] Database imported by ${req.user.email} at ${new Date().toISOString()}`);
+
+        return res.json({
+            success: true,
+            message: "Import database thành công!",
+            importedAt: new Date().toISOString(),
+            results
+        });
+    } catch (err) {
+        console.error("[admin] importDatabase error:", err);
+        return res.status(500).json({ error: "Lỗi khi import database: " + err.message });
+    }
+};
